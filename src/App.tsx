@@ -7,7 +7,7 @@ import { ipRepo } from '@/db/repositories/ipRepo'
 import { settingsRepo } from '@/db/repositories/settingsRepo'
 import { onAuthChange } from '@/firebase/auth'
 import { isFirebaseConfigured } from '@/firebase/config'
-import { loadAllFromCloud, migrateAllToCloud } from '@/firebase/syncManager'
+import { syncOnLogin, setSyncUser, setSyncStatusHandler } from '@/firebase/syncManager'
 
 import Onboarding from '@/pages/Onboarding'
 import IpSelector from '@/pages/IpSelector'
@@ -41,17 +41,30 @@ function App() {
       return
     }
 
+    // Let background auto-sync update the sidebar status indicator.
+    setSyncStatusHandler(setSyncStatus)
+
     const unsubscribe = onAuthChange(async (user) => {
       if (user) {
         setUserId(user.uid)
+        setSyncUser(user.uid)
+        setLoading(true)
         setSyncStatus('syncing')
-        await loadAllFromCloud(user.uid)
-        setSyncStatus('synced')
+        try {
+          await syncOnLogin(user.uid)
+          setSyncStatus('synced')
+        } catch (e) {
+          console.warn('Sync on login failed:', e)
+          setSyncStatus('error')
+        }
         await initAppLocal()
       } else {
+        // Login is required — show the auth screen when no user is signed in.
         setUserId(null)
+        setSyncUser(null)
         setSyncStatus('offline')
-        await initAppLocal()
+        setRoute('auth')
+        setLoading(false)
       }
     })
 

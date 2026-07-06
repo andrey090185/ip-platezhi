@@ -116,13 +116,10 @@ export default function Auth() {
             </Button>
           </form>
 
-          <Button
-            variant="ghost"
-            className="w-full"
-            onClick={() => navigate('/onboarding')}
-          >
-            Продолжить без аккаунта
-          </Button>
+          <p className="text-xs text-muted-foreground text-center">
+            Вход нужен, чтобы ваши данные сохранялись в облаке и были доступны
+            с любого устройства.
+          </p>
         </CardContent>
       </Card>
     </div>
