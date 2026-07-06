@@ -41,50 +41,50 @@ export async function generateCalendarEvents(
   const y = String(year)
   const y1 = String(year + 1)
 
-  pushEvent(y + '-04-28', 'payment', 'USN Q1 advance', 'USN Q1 advance payment', null, y + '-Q1')
-  pushEvent(y + '-07-28', 'payment', 'USN H1 advance', 'USN H1 advance payment', null, y + '-Q2')
-  pushEvent(y + '-10-28', 'payment', 'USN Q3 advance', 'USN Q3 advance payment', null, y + '-Q3')
-  pushEvent(y1 + '-04-28', 'payment', 'USN annual payment', 'USN annual tax payment', null, y + '-annual')
+  pushEvent(y + '-04-28', 'payment', 'Аванс УСН за 1 квартал', 'Авансовый платёж по УСН за 1 квартал', null, y + '-Q1')
+  pushEvent(y + '-07-28', 'payment', 'Аванс УСН за полугодие', 'Авансовый платёж по УСН за полугодие', null, y + '-Q2')
+  pushEvent(y + '-10-28', 'payment', 'Аванс УСН за 9 месяцев', 'Авансовый платёж по УСН за 9 месяцев', null, y + '-Q3')
+  pushEvent(y1 + '-04-28', 'payment', 'Годовой налог УСН', 'Итоговый платёж по УСН за год', null, y + '-annual')
 
-  pushEvent(y1 + '-04-25', 'report', 'USN declaration', 'Submit USN declaration for the year', null, y + '-annual')
+  pushEvent(y1 + '-04-25', 'report', 'Декларация УСН', 'Сдать декларацию по УСН за год', null, y + '-annual')
 
-  pushEvent(y + '-12-28', 'payment', 'Fixed insurance premiums', 'Fixed insurance premiums for the year', String(settings.fixedPremium), y)
-  pushEvent(y1 + '-07-01', 'payment', 'Additional 1% premium', 'Additional 1% on income over 300000 RUB', null, y)
+  pushEvent(y + '-12-28', 'payment', 'Фиксированные взносы ИП', 'Фиксированные страховые взносы ИП за год', String(settings.fixedPremium), y)
+  pushEvent(y1 + '-07-01', 'payment', 'Дополнительный взнос 1%', 'Дополнительный взнос 1% с дохода свыше 300 000 ₽', null, y)
 
   for (let month = 1; month <= 12; month++) {
     const m = String(month).padStart(2, '0')
 
-    pushEvent(y + '-' + m + '-25', 'notification', 'ENS notification ' + m + '.' + y, 'Submit ENS notification')
-    pushEvent(y + '-' + m + '-28', 'payment', 'Insurance premiums ' + m + '.' + y, 'Pay employee insurance premiums')
+    pushEvent(y + '-' + m + '-25', 'notification', 'Уведомление ЕНС ' + m + '.' + y, 'Подать уведомление по ЕНС')
+    pushEvent(y + '-' + m + '-28', 'payment', 'Страховые взносы за сотрудников ' + m + '.' + y, 'Уплата страховых взносов за сотрудников')
 
-    pushEvent(y + '-' + m + '-25', 'notification', 'NDFL notification (1-22) ' + m + '.' + y, 'NDFL notification for period 1-22')
-    pushEvent(y + '-' + m + '-28', 'payment', 'NDFL payment (1-22) ' + m + '.' + y, 'NDFL payment for period 1-22')
+    pushEvent(y + '-' + m + '-25', 'notification', 'Уведомление НДФЛ (1–22) ' + m + '.' + y, 'Уведомление по НДФЛ за период с 1 по 22 число')
+    pushEvent(y + '-' + m + '-28', 'payment', 'НДФЛ (1–22) ' + m + '.' + y, 'Уплата НДФЛ за период с 1 по 22 число')
 
     if (month < 12) {
       const nextMonth = String(month + 1).padStart(2, '0')
-      pushEvent(y + '-' + nextMonth + '-03', 'notification', 'NDFL notification (23-end) ' + m + '.' + y, 'NDFL notification for period 23-end of month')
-      pushEvent(y + '-' + nextMonth + '-05', 'payment', 'NDFL payment (23-end) ' + m + '.' + y, 'NDFL payment for period 23-end of month')
+      pushEvent(y + '-' + nextMonth + '-03', 'notification', 'Уведомление НДФЛ (23–конец мес.) ' + m + '.' + y, 'Уведомление по НДФЛ за период с 23 числа до конца месяца')
+      pushEvent(y + '-' + nextMonth + '-05', 'payment', 'НДФЛ (23–конец мес.) ' + m + '.' + y, 'Уплата НДФЛ за период с 23 числа до конца месяца')
     } else {
-      pushEvent(y1 + '-01-05', 'notification', 'NDFL notification (23-end) 12.' + y, 'NDFL notification for December (23-31)')
-      pushEvent(y1 + '-01-09', 'payment', 'NDFL payment (23-end) 12.' + y, 'NDFL payment for December (23-31)')
+      pushEvent(y1 + '-01-05', 'notification', 'Уведомление НДФЛ (23–31 дек.) ' + y, 'Уведомление по НДФЛ за период 23–31 декабря')
+      pushEvent(y1 + '-01-09', 'payment', 'НДФЛ (23–31 дек.) ' + y, 'Уплата НДФЛ за период 23–31 декабря')
     }
 
-    pushEvent(y + '-' + m + '-15', 'payment', 'Trauma insurance ' + m + '.' + y, 'Pay trauma insurance premiums')
+    pushEvent(y + '-' + m + '-15', 'payment', 'Взносы на травматизм ' + m + '.' + y, 'Уплата взносов на травматизм')
   }
 
   const quarterReports = [
-    { q: 1, name: '6-NDFL', due: y + '-04-25', dest: 'FNS' },
-    { q: 1, name: 'RSV', due: y + '-04-25', dest: 'FNS' },
-    { q: 2, name: '6-NDFL', due: y + '-07-25', dest: 'FNS' },
-    { q: 2, name: 'RSV', due: y + '-07-25', dest: 'FNS' },
-    { q: 3, name: '6-NDFL', due: y + '-10-25', dest: 'FNS' },
-    { q: 3, name: 'RSV', due: y + '-10-25', dest: 'FNS' },
-    { q: 4, name: '6-NDFL', due: y1 + '-02-25', dest: 'FNS' },
-    { q: 4, name: 'RSV', due: y1 + '-02-25', dest: 'FNS' },
+    { q: 1, name: '6-НДФЛ', due: y + '-04-25' },
+    { q: 1, name: 'РСВ', due: y + '-04-25' },
+    { q: 2, name: '6-НДФЛ', due: y + '-07-25' },
+    { q: 2, name: 'РСВ', due: y + '-07-25' },
+    { q: 3, name: '6-НДФЛ', due: y + '-10-25' },
+    { q: 3, name: 'РСВ', due: y + '-10-25' },
+    { q: 4, name: '6-НДФЛ', due: y1 + '-02-25' },
+    { q: 4, name: 'РСВ', due: y1 + '-02-25' },
   ]
 
   for (const r of quarterReports) {
-    pushEvent(r.due, 'report', r.name + ' Q' + r.q, 'Submit ' + r.name + ' (' + r.dest + ')')
+    pushEvent(r.due, 'report', r.name + ' за ' + r.q + ' кв. ' + y, 'Сдать ' + r.name + ' в ФНС')
   }
 
   return events

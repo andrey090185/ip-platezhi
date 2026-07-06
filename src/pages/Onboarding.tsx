@@ -9,6 +9,7 @@ import { useAppStore } from '@/store/appStore'
 import { ipRepo } from '@/db/repositories/ipRepo'
 import { seedTaxSettings, seedHolidays, seedDemoTransactions } from '@/db/seed'
 import { settingsRepo } from '@/db/repositories/settingsRepo'
+import { getSyncUser, pushAllToCloud } from '@/firebase/syncManager'
 import type { IpProfile } from '@/types'
 import { ChevronRight, ChevronLeft, Check, ArrowLeft } from 'lucide-react'
 
@@ -70,10 +71,21 @@ export default function Onboarding() {
     setHolidays(holidays)
     setIsOnboarded(true)
 
+    // Push the new profile to the cloud BEFORE reloading. Otherwise the
+    // on-login mirror (cloud → local) runs first and erases the new IP,
+    // because the debounced auto-sync has not had time to upload it yet.
+    const uid = getSyncUser()
+    if (uid) {
+      try {
+        await pushAllToCloud(uid)
+      } catch (e) {
+        console.warn('Cloud push after onboarding failed:', e)
+      }
+    }
+
     // Full reload so App re-runs its startup routing (now there is an IP, it
-    // resolves to the app) and pushes the new data to the cloud on login.
-    // A plain navigate() would be bounced back to /onboarding by the
-    // onboarding-scoped router.
+    // resolves to the app). A plain navigate() would be bounced back to
+    // /onboarding by the onboarding-scoped router.
     window.location.href = '/dashboard'
   }
 

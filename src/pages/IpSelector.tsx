@@ -35,7 +35,9 @@ export default function IpSelector() {
     const holidays = await settingsRepo.getHolidays(ip.id!, ip.year)
     setHolidays(holidays)
     setIsOnboarded(true)
-    navigate('/dashboard')
+    // Full reload so App re-resolves routing to the app for the selected IP.
+    // A plain navigate() is bounced back to /ips while route === 'selector'.
+    window.location.href = '/dashboard'
   }
 
   const handleDelete = async () => {

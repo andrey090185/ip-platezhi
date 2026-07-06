@@ -23,6 +23,10 @@ import {
 } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 
+// Guards against generating the calendar twice for the same IP when loadData
+// runs concurrently (which duplicated the upcoming-reports list).
+const generatingCalendar = new Set<number>()
+
 export default function Dashboard() {
   const { currentIp, taxSettings, holidays } = useAppStore()
   const navigate = useNavigate()
@@ -61,11 +65,17 @@ export default function Dashboard() {
       // 1. Transaction totals
       const { income, expenses } = await transactionRepo.getYearTotals(ipId, year)
 
-      // 2. Auto-generate calendar if empty
+      // 2. Auto-generate calendar if empty (guarded so a concurrent load
+      //    cannot generate the same events twice)
       let calendar = await calendarRepo.getAll(ipId)
-      if (calendar.length === 0 && taxSettings) {
-        const events = await generateCalendarEvents(ipId, taxSettings, holidays)
-        await calendarRepo.addBatch(events)
+      if (calendar.length === 0 && taxSettings && !generatingCalendar.has(ipId)) {
+        generatingCalendar.add(ipId)
+        try {
+          const events = await generateCalendarEvents(ipId, taxSettings, holidays)
+          await calendarRepo.addBatch(events)
+        } finally {
+          generatingCalendar.delete(ipId)
+        }
         calendar = await calendarRepo.getAll(ipId)
       }
 
