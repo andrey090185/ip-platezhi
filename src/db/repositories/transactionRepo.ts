@@ -1,6 +1,7 @@
 import { db } from '../schema'
 import type { Transaction, TransactionType } from '@/types'
 import { dSum, d } from '@/engine/decimal'
+import { syncAdd, syncUpdate, syncDelete } from '@/firebase/syncManager'
 
 export const transactionRepo = {
   async getAll(ipId: number): Promise<Transaction[]> {
@@ -19,16 +20,20 @@ export const transactionRepo = {
       .toArray()
   },
 
-  async add(tx: Omit<Transaction, 'id'>): Promise<number> {
-    return db.transactions.add(tx as Transaction)
+  async add(tx: Omit<Transaction, 'id'>, userId?: string): Promise<number> {
+    const id = await db.transactions.add(tx as Transaction)
+    if (userId) await syncAdd(userId, db.transactions, id as number, { ...tx, id })
+    return id
   },
 
-  async update(id: number, changes: Partial<Transaction>): Promise<void> {
+  async update(id: number, changes: Partial<Transaction>, userId?: string): Promise<void> {
     await db.transactions.update(id, { ...changes, updatedAt: new Date().toISOString() })
+    if (userId) await syncUpdate(userId, db.transactions, id, { ...changes, id })
   },
 
-  async delete(id: number): Promise<void> {
+  async delete(id: number, userId?: string): Promise<void> {
     await db.transactions.delete(id)
+    if (userId) await syncDelete(userId, db.transactions, id)
   },
 
   async getIncomeTotal(ipId: number, period?: string): Promise<string> {

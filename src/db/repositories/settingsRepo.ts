@@ -1,30 +1,37 @@
 import { db } from '../schema'
 import type { TaxSettings, Holiday } from '@/types'
+import { syncAdd, syncUpdate, syncDelete } from '@/firebase/syncManager'
 
 export const settingsRepo = {
   async getTaxSettings(ipId: number): Promise<TaxSettings | undefined> {
     return db.taxSettings.where('ipId').equals(ipId).first()
   },
 
-  async saveTaxSettings(settings: Omit<TaxSettings, 'id'>): Promise<number> {
+  async saveTaxSettings(settings: Omit<TaxSettings, 'id'>, userId?: string): Promise<number> {
     const existing = await db.taxSettings.where('ipId').equals(settings.ipId).first()
     if (existing?.id) {
       await db.taxSettings.update(existing.id, { ...settings, updatedAt: new Date().toISOString() })
+      if (userId) await syncUpdate(userId, db.taxSettings, existing.id, { ...settings, id: existing.id })
       return existing.id
     }
-    return db.taxSettings.add(settings as TaxSettings)
+    const id = await db.taxSettings.add(settings as TaxSettings)
+    if (userId) await syncAdd(userId, db.taxSettings, id as number, { ...settings, id })
+    return id
   },
 
   async getHolidays(ipId: number, year: number): Promise<Holiday[]> {
     return db.holidays.where({ ipId, year }).toArray()
   },
 
-  async addHoliday(holiday: Omit<Holiday, 'id'>): Promise<number> {
-    return db.holidays.add(holiday as Holiday)
+  async addHoliday(holiday: Omit<Holiday, 'id'>, userId?: string): Promise<number> {
+    const id = await db.holidays.add(holiday as Holiday)
+    if (userId) await syncAdd(userId, db.holidays, id as number, { ...holiday, id })
+    return id
   },
 
-  async deleteHoliday(id: number): Promise<void> {
+  async deleteHoliday(id: number, userId?: string): Promise<void> {
     await db.holidays.delete(id)
+    if (userId) await syncDelete(userId, db.holidays, id)
   },
 
   async clearHolidays(ipId: number, year: number): Promise<void> {

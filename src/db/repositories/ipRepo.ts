@@ -1,5 +1,6 @@
 import { db } from '../schema'
 import type { IpProfile } from '@/types'
+import { syncAdd, syncUpdate, syncDelete, loadFromCloud } from '@/firebase/syncManager'
 
 export const ipRepo = {
   async get(): Promise<IpProfile | undefined> {
@@ -14,19 +15,23 @@ export const ipRepo = {
     return db.ipProfiles.count()
   },
 
-  async add(ip: Omit<IpProfile, 'id'>): Promise<number> {
-    return db.ipProfiles.add(ip as IpProfile)
+  async add(ip: Omit<IpProfile, 'id'>, userId?: string): Promise<number> {
+    const id = await db.ipProfiles.add(ip as IpProfile)
+    if (userId) await syncAdd(userId, db.ipProfiles, id as number, { ...ip, id })
+    return id
   },
 
-  async update(id: number, changes: Partial<IpProfile>): Promise<void> {
+  async update(id: number, changes: Partial<IpProfile>, userId?: string): Promise<void> {
     await db.ipProfiles.update(id, { ...changes, updatedAt: new Date().toISOString() })
+    if (userId) await syncUpdate(userId, db.ipProfiles, id, { ...changes, id })
   },
 
-  async delete(id: number): Promise<void> {
+  async delete(id: number, userId?: string): Promise<void> {
     await db.ipProfiles.delete(id)
+    if (userId) await syncDelete(userId, db.ipProfiles, id)
   },
 
-  async deleteWithCascade(id: number): Promise<void> {
+  async deleteWithCascade(id: number, userId?: string): Promise<void> {
     await db.transaction('rw', [
       db.ipProfiles, db.taxSettings, db.holidays, db.transactions,
       db.employees, db.employeeDeductions, db.payrollRecords,
@@ -46,5 +51,22 @@ export const ipRepo = {
       await db.reportRecords.where('ipId').equals(id).delete()
       await db.ipProfiles.delete(id)
     })
+
+    if (userId) {
+      try {
+        const { syncDeleteTable } = await import('@/firebase/sync')
+        const tables = [
+          'ipProfiles', 'taxSettings', 'holidays', 'transactions',
+          'employees', 'employeeDeductions', 'payrollRecords',
+          'taxCalculations', 'calendarEvents', 'auditLogs',
+          'ensRecords', 'reportRecords'
+        ] as const
+        for (const table of tables) {
+          await syncDeleteTable(userId, table)
+        }
+      } catch (e) {
+        console.warn('Cascade sync failed:', e)
+      }
+    }
   },
 }

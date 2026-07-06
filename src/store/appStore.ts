@@ -11,6 +11,8 @@ interface AppState {
   ipList: IpProfile[]
   sidebarOpen: boolean
   theme: 'light' | 'dark'
+  userId: string | null
+  syncStatus: 'synced' | 'syncing' | 'offline' | 'error'
 
   setCurrentIp: (ip: IpProfile | null) => void
   setTaxSettings: (settings: TaxSettings | null) => void
@@ -21,6 +23,8 @@ interface AppState {
   setTheme: (theme: 'light' | 'dark') => void
   toggleTheme: () => void
   getLastActiveIpId: () => number | null
+  setUserId: (id: string | null) => void
+  setSyncStatus: (status: 'synced' | 'syncing' | 'offline' | 'error') => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -31,6 +35,8 @@ export const useAppStore = create<AppState>((set) => ({
   ipList: [],
   sidebarOpen: false,
   theme: (typeof window !== 'undefined' && localStorage.getItem('theme') as 'light' | 'dark') || 'light',
+  userId: null,
+  syncStatus: 'offline',
 
   setCurrentIp: (ip) => {
     if (ip?.id) {
@@ -56,4 +62,6 @@ export const useAppStore = create<AppState>((set) => ({
     const val = localStorage.getItem(LAST_IP_KEY)
     return val ? parseInt(val) : null
   },
+  setUserId: (id) => set({ userId: id }),
+  setSyncStatus: (status) => set({ syncStatus: status }),
 }))

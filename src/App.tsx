@@ -5,9 +5,13 @@ import { Layout } from '@/components/layout/Layout'
 import { useAppStore } from '@/store/appStore'
 import { ipRepo } from '@/db/repositories/ipRepo'
 import { settingsRepo } from '@/db/repositories/settingsRepo'
+import { onAuthChange } from '@/firebase/auth'
+import { isFirebaseConfigured } from '@/firebase/config'
+import { loadAllFromCloud, migrateAllToCloud } from '@/firebase/syncManager'
 
 import Onboarding from '@/pages/Onboarding'
 import IpSelector from '@/pages/IpSelector'
+import Auth from '@/pages/Auth'
 import Dashboard from '@/pages/Dashboard'
 import IncomeExpenses from '@/pages/IncomeExpenses'
 import Employees from '@/pages/Employees'
@@ -20,21 +24,41 @@ import Settings from '@/pages/Settings'
 
 function App() {
   const [loading, setLoading] = useState(true)
-  const [route, setRoute] = useState<'loading' | 'onboarding' | 'selector' | 'app'>('loading')
+  const [route, setRoute] = useState<'loading' | 'auth' | 'onboarding' | 'selector' | 'app'>('loading')
   const {
     setCurrentIp, setTaxSettings, setHolidays, setIsOnboarded, setIpList,
-    theme, isOnboarded
+    setUserId, setSyncStatus,
+    theme
   } = useAppStore()
-
-  useEffect(() => {
-    initApp()
-  }, [])
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
   }, [theme])
 
-  const initApp = async () => {
+  useEffect(() => {
+    if (!isFirebaseConfigured()) {
+      initAppLocal()
+      return
+    }
+
+    const unsubscribe = onAuthChange(async (user) => {
+      if (user) {
+        setUserId(user.uid)
+        setSyncStatus('syncing')
+        await loadAllFromCloud(user.uid)
+        setSyncStatus('synced')
+        await initAppLocal()
+      } else {
+        setUserId(null)
+        setSyncStatus('offline')
+        await initAppLocal()
+      }
+    })
+
+    return () => unsubscribe()
+  }, [])
+
+  const initAppLocal = async () => {
     const count = await ipRepo.getCount()
 
     if (count === 0) {
@@ -58,11 +82,10 @@ function App() {
       return
     }
 
-    // Multiple IPs — try last active, else show selector
     const lastId = useAppStore.getState().getLastActiveIpId()
     if (lastId) {
-      const ip = await ipRepo.getAll()
-      const found = ip.find(i => i.id === lastId)
+      const ips = await ipRepo.getAll()
+      const found = ips.find(i => i.id === lastId)
       if (found) {
         setCurrentIp(found)
         const settings = await settingsRepo.getTaxSettings(found.id!)
@@ -90,6 +113,18 @@ function App() {
           <p className="text-sm text-muted-foreground">Загрузка...</p>
         </div>
       </div>
+    )
+  }
+
+  if (route === 'auth') {
+    return (
+      <TooltipProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="*" element={<Auth />} />
+          </Routes>
+        </BrowserRouter>
+      </TooltipProvider>
     )
   }
 
@@ -124,6 +159,7 @@ function App() {
     <TooltipProvider>
       <BrowserRouter>
         <Routes>
+          <Route path="/auth" element={<Auth />} />
           <Route path="/onboarding" element={<Onboarding />} />
           <Route path="/ips" element={<IpSelector />} />
           <Route element={<Layout />}>
