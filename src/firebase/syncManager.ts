@@ -168,13 +168,17 @@ export async function mirrorAllFromCloud(userId: string): Promise<void> {
   suppressSync(true)
   try {
     for (const [dexieTable, name] of CANON) {
-      const cloud = await syncTableFromCloud(userId, name)
-      const records = Object.entries(cloud).map(([id, rec]) => ({
-        ...(rec as any),
-        id: Number(id),
-      }))
-      await dexieTable.clear()
-      if (records.length) await dexieTable.bulkPut(records as any)
+      try {
+        const cloud = await syncTableFromCloud(userId, name)
+        const records = Object.entries(cloud).map(([id, rec]) => ({
+          ...(rec as any),
+          id: Number(id),
+        }))
+        await dexieTable.clear()
+        if (records.length) await dexieTable.bulkPut(records as any)
+      } catch (e) {
+        console.warn(`Mirror of table "${name}" failed:`, e)
+      }
     }
   } finally {
     suppressSync(false)

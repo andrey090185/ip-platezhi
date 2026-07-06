@@ -9,6 +9,12 @@ function getUserPath(userId: string, table: TableName): string {
   return `users/${userId}/${table}`
 }
 
+// Firebase Realtime Database rejects any `undefined` value. Optional fields and
+// the record's own `id` must be removed before writing, or `set()` throws.
+function forFirebase(value: any): any {
+  return JSON.parse(JSON.stringify(value ?? null))
+}
+
 // Write entire collection for a table
 export async function syncTableToCloud(userId: string, table: TableName, data: any[]): Promise<void> {
   const path = getUserPath(userId, table)
@@ -16,7 +22,8 @@ export async function syncTableToCloud(userId: string, table: TableName, data: a
   const map: Record<string, any> = {}
   for (const item of data) {
     const id = String(item.id || push(ref(db, path)).key)
-    map[id] = { ...item, id: undefined }
+    const { id: _omit, ...rest } = item
+    map[id] = forFirebase(rest)
   }
   await set(dbRef, map)
 }
@@ -26,7 +33,7 @@ export async function syncRecordToCloud(userId: string, table: TableName, id: nu
   const path = `${getUserPath(userId, table)}/${id}`
   const dbRef = ref(db, path)
   const { id: _, ...rest } = data
-  await set(dbRef, rest)
+  await set(dbRef, forFirebase(rest))
 }
 
 // Delete single record

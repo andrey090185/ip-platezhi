@@ -70,7 +70,11 @@ export default function Onboarding() {
     setHolidays(holidays)
     setIsOnboarded(true)
 
-    navigate('/dashboard')
+    // Full reload so App re-runs its startup routing (now there is an IP, it
+    // resolves to the app) and pushes the new data to the cloud on login.
+    // A plain navigate() would be bounced back to /onboarding by the
+    // onboarding-scoped router.
+    window.location.href = '/dashboard'
   }
 
   return (
