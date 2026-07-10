@@ -10,7 +10,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
   DialogDescription, DialogFooter,
 } from '@/components/ui/dialog'
-import { Plus, Trash2, Building2, Users, Calendar } from 'lucide-react'
+import { Plus, Trash2, Building2, Calendar } from 'lucide-react'
 import { EmptyState } from '@/components/shared/EmptyState'
 
 export default function IpSelector() {
@@ -113,17 +113,11 @@ export default function IpSelector() {
                     <Badge variant="outline">{ip.year}</Badge>
                     {ip.region && <Badge variant="outline">{ip.region}</Badge>}
                   </div>
-                  <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                    {ip.hasEmployees && (
-                      <span className="flex items-center gap-1">
-                        <Users className="w-3.5 h-3.5" />
-                        {ip.employeeCount || '?'} сотр.
-                      </span>
-                    )}
-                    {ip.ndsEnabled && (
+                  {ip.ndsEnabled && (
+                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
                       <Badge variant="secondary" className="text-xs">НДС</Badge>
-                    )}
-                  </div>
+                    </div>
+                  )}
                   <Button variant="outline" size="sm" className="w-full">
                     Открыть
                   </Button>
@@ -139,7 +133,7 @@ export default function IpSelector() {
               <DialogTitle>Удалить ИП?</DialogTitle>
               <DialogDescription>
                 Все данные ИП «{deleteTarget?.name}» будут безвозвратно удалены:
-                доходы, расходы, сотрудники, расчёты, календарь, настройки.
+                доходы, расходы, расчёты, календарь, настройки.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>

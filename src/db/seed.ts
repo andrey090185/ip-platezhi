@@ -1,5 +1,5 @@
 import { db } from './schema'
-import type { IpProfile, TaxSettings, Holiday, Transaction } from '@/types'
+import type { TaxSettings, Holiday } from '@/types'
 
 const NOW = new Date().toISOString()
 
@@ -18,10 +18,6 @@ const DEFAULT_TAX_SETTINGS: Omit<TaxSettings, 'id'> = {
   additionalPremiumRate: 1,
   additionalPremiumMax: 321818,
   considerAdditionalInCurrentYear: false,
-  insuranceBaseThreshold: 2979000,
-  insuranceMainRate: 30,
-  insuranceExcessRate: 15.1,
-  traumaRate: 0.2,
   ndsThreshold: 20000000,
   ndsMode: 'standard',
   reducedTariffEnabled: false,
@@ -76,23 +72,15 @@ export async function seedHolidays(ipId: number, year: number) {
   }
 }
 
-export async function seedDemoTransactions(ipId: number) {
-  const existing = await db.transactions.where('ipId').equals(ipId).first()
-  if (existing) return
-
+// Development-only: seed test data for debugging
+export async function seedDevData(ipId: number) {
+  console.warn('[DEV] Seeding test data for ipId:', ipId)
   const now = new Date().toISOString()
-  const demoTxs: Omit<Transaction, 'id'>[] = [
-    { ipId, date: '2026-01-15', type: 'income', amount: '150000', category: 'Услуги', counterparty: 'ООО Ромашка', comment: 'Разработка сайта', usnRelevant: true, ndsRelevant: false, period: '2026-01', createdAt: now, updatedAt: now },
-    { ipId, date: '2026-01-28', type: 'income', amount: '85000', category: 'Услуги', counterparty: 'ИП Петров', comment: 'Консультация', usnRelevant: true, ndsRelevant: false, period: '2026-01', createdAt: now, updatedAt: now },
-    { ipId, date: '2026-02-10', type: 'income', amount: '200000', category: 'Услуги', counterparty: 'ООО Вектор', comment: 'Аудит', usnRelevant: true, ndsRelevant: false, period: '2026-02', createdAt: now, updatedAt: now },
-    { ipId, date: '2026-02-20', type: 'expense', amount: '35000', category: 'Аренда', counterparty: 'Аренда офиса', comment: 'Февраль', usnRelevant: true, ndsRelevant: false, period: '2026-02', createdAt: now, updatedAt: now },
-    { ipId, date: '2026-03-05', type: 'income', amount: '180000', category: 'Услуги', counterparty: 'ООО Солнце', comment: 'Маркетинг', usnRelevant: true, ndsRelevant: false, period: '2026-03', createdAt: now, updatedAt: now },
-    { ipId, date: '2026-03-15', type: 'income', amount: '120000', category: 'Услуги', counterparty: 'ИП Сидоров', comment: 'Дизайн', usnRelevant: true, ndsRelevant: false, period: '2026-03', createdAt: now, updatedAt: now },
-    { ipId, date: '2026-04-10', type: 'income', amount: '250000', category: 'Услуги', counterparty: 'ООО Техно', comment: 'Интеграция', usnRelevant: true, ndsRelevant: false, period: '2026-04', createdAt: now, updatedAt: now },
-    { ipId, date: '2026-05-12', type: 'income', amount: '300000', category: 'Услуги', counterparty: 'ООО Медиа', comment: 'Продвижение', usnRelevant: true, ndsRelevant: false, period: '2026-05', createdAt: now, updatedAt: now },
-    { ipId, date: '2026-06-08', type: 'income', amount: '175000', category: 'Услуги', counterparty: 'ООО Форум', comment: 'Тренинг', usnRelevant: true, ndsRelevant: false, period: '2026-06', createdAt: now, updatedAt: now },
+  const testTxs = [
+    { ipId, date: '2026-01-15', type: 'income' as const, amount: '150000', category: 'Услуги', counterparty: 'ООО Ромашка', comment: '[DEV] Тестовая операция', usnRelevant: true, ndsRelevant: false, period: '2026-01', importSource: null, importBatchId: null, status: 'accounted' as const, createdAt: now, updatedAt: now },
+    { ipId, date: '2026-02-10', type: 'income' as const, amount: '200000', category: 'Услуги', counterparty: 'ООО Вектор', comment: '[DEV] Тестовая операция', usnRelevant: true, ndsRelevant: false, period: '2026-02', importSource: null, importBatchId: null, status: 'accounted' as const, createdAt: now, updatedAt: now },
   ]
-  for (const tx of demoTxs) {
-    await db.transactions.add(tx as Transaction)
+  for (const tx of testTxs) {
+    await db.transactions.add(tx as any)
   }
 }

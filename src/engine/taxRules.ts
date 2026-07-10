@@ -1,4 +1,4 @@
-import type { TaxSettings } from '@/types'
+import type { TaxSettings, RuleSet } from '@/types'
 
 export const DEFAULT_TAX_SETTINGS: Omit<TaxSettings, 'id' | 'ipId' | 'createdAt' | 'updatedAt'> = {
   year: 2026,
@@ -14,10 +14,6 @@ export const DEFAULT_TAX_SETTINGS: Omit<TaxSettings, 'id' | 'ipId' | 'createdAt'
   additionalPremiumRate: 1,
   additionalPremiumMax: 321818,
   considerAdditionalInCurrentYear: false,
-  insuranceBaseThreshold: 2979000,
-  insuranceMainRate: 30,
-  insuranceExcessRate: 15.1,
-  traumaRate: 0.2,
   ndsThreshold: 20000000,
   ndsMode: 'standard',
   reducedTariffEnabled: false,
@@ -25,10 +21,14 @@ export const DEFAULT_TAX_SETTINGS: Omit<TaxSettings, 'id' | 'ipId' | 'createdAt'
 }
 
 export function getEffectiveRate(settings: TaxSettings, usnObject: 'income' | 'income_minus_expenses' = 'income'): number {
-  const base = usnObject === 'income'
+  // Effective rate: regional laws may set a lower or higher rate
+  // Regional rate represents the ACTUAL rate, not an addition to base
+  if (settings.usnRegionalRate > 0) {
+    return settings.usnRegionalRate
+  }
+  return usnObject === 'income'
     ? settings.usnRateIncome
     : settings.usnRateIncomeMinusExpenses
-  return base + settings.usnRegionalRate
 }
 
 export function getUsnDueDate(quarter: number, year: number): string {
@@ -45,29 +45,12 @@ export function getUsnDeclarationDueDate(year: number): string {
   return `${year + 1}-04-25`
 }
 
-export function getInsurancePremiumDueDate(month: number, year: number): string {
-  if (month === 12) return `${year}-12-28`
-  return `${year}-${String(month + 1).padStart(2, '0')}-28`
-}
-
 export function getFixedPremiumDueDate(year: number): string {
   return `${year}-12-28`
 }
 
 export function getAdditionalPremiumDueDate(year: number): string {
   return `${year + 1}-07-01`
-}
-
-export function getNdfNotificationDueDate(periodStart: number, month: number, year: number): string {
-  if (periodStart === 1) return `${year}-${String(month).padStart(2, '0')}-25`
-  if (periodStart === 23) return `${year}-${String(month + 1).padStart(2, '0')}-03`
-  return `${year + 1}-01-05`
-}
-
-export function getNdfPaymentDueDate(periodStart: number, month: number, year: number): string {
-  if (periodStart === 1) return `${year}-${String(month).padStart(2, '0')}-28`
-  if (periodStart === 23) return `${year}-${String(month + 1).padStart(2, '0')}-05`
-  return `${year + 1}-01-09`
 }
 
 export function getReportPeriod(quarter: number): string {
@@ -78,4 +61,40 @@ export function getReportPeriod(quarter: number): string {
     4: 'год',
   }
   return periods[quarter]
+}
+
+// Versioned rule set for 2026
+export const RULESET_2026: RuleSet = {
+  year: 2026,
+  version: '2026.1',
+  fixedPremium: 57390,
+  additionalPremiumThreshold: 300000,
+  additionalPremiumRate: 1,
+  additionalPremiumMax: 321818,
+  usnIncomeLimit: 490500000,
+  usnAssetLimit: 218000000,
+  ndsThreshold: 20000000,
+  ndsMainRate: 22,
+  effectiveFrom: '2026-01-01',
+  holidays: [
+    { date: '2026-01-01', name: 'Новый год' },
+    { date: '2026-01-02', name: 'Новый год' },
+    { date: '2026-01-03', name: 'Новый год' },
+    { date: '2026-01-04', name: 'Новый год' },
+    { date: '2026-01-05', name: 'Новый год' },
+    { date: '2026-01-06', name: 'Новый год' },
+    { date: '2026-01-07', name: 'Рождество Христово' },
+    { date: '2026-01-08', name: 'Новый год' },
+    { date: '2026-02-23', name: 'День защитника Отечества' },
+    { date: '2026-03-08', name: 'Международный женский день' },
+    { date: '2026-05-01', name: 'Праздник Весны и Труда' },
+    { date: '2026-05-09', name: 'День Победы' },
+    { date: '2026-06-12', name: 'День России' },
+    { date: '2026-11-04', name: 'День народного единства' },
+  ],
+}
+
+export function getRuleSet(year: number): RuleSet | null {
+  if (year === 2026) return RULESET_2026
+  return null
 }

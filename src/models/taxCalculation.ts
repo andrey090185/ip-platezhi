@@ -1,1 +1,1 @@
-export type { TaxCalculation, PaymentStatus } from '@/types'
+export type { TaxObligation, ObligationStatus } from '@/types'

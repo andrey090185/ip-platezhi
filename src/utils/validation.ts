@@ -1,4 +1,4 @@
-import type { Transaction, PayrollRecord, Employee } from '@/types'
+import type { Transaction } from '@/types'
 
 export function validateTransaction(tx: Partial<Transaction>): string[] {
   const errors: string[] = []
@@ -10,30 +10,6 @@ export function validateTransaction(tx: Partial<Transaction>): string[] {
     }
   }
   if (!tx.category) errors.push('Категория обязательна')
-  return errors
-}
-
-export function validatePayroll(pr: Partial<PayrollRecord>, employee: Employee | undefined): string[] {
-  const errors: string[] = []
-  if (!employee) errors.push('Сотрудник не найден')
-  if (employee?.status !== 'active') errors.push('Сотрудник не активен')
-  if (employee?.fireDate && pr.period && pr.period > employee.fireDate.substring(0, 7)) {
-    errors.push('Нельзя начислить зарплату после даты увольнения')
-  }
-  if (!pr.period) errors.push('Период обязателен')
-  return errors
-}
-
-export function validateDeduction(deduction: { dateFrom?: string; dateTo?: string; amount?: string }): string[] {
-  const errors: string[] = []
-  if (!deduction.dateFrom) errors.push('Дата начала обязательна')
-  if (!deduction.dateTo) errors.push('Дата окончания обязательна')
-  if (deduction.dateFrom && deduction.dateTo && deduction.dateFrom > deduction.dateTo) {
-    errors.push('Дата начала не может быть позже даты окончания')
-  }
-  if (!deduction.amount || parseFloat(deduction.amount) <= 0) {
-    errors.push('Сумма вычета должна быть положительной')
-  }
   return errors
 }
 

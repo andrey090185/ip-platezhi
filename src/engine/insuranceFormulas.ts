@@ -1,6 +1,6 @@
 import type { TaxSettings } from '@/types'
 import { d, dMul, dMax, dMin, dToString } from './decimal'
-import { getFixedPremiumDueDate, getAdditionalPremiumDueDate, getInsurancePremiumDueDate } from './taxRules'
+import { getFixedPremiumDueDate, getAdditionalPremiumDueDate } from './taxRules'
 
 export interface FixedPremiumResult {
   annualAmount: string
@@ -18,18 +18,6 @@ export interface AdditionalPremiumResult {
   maxAmount: string
   finalAmount: string
   dueDate: string
-  formula: string
-}
-
-export interface EmployeeInsuranceResult {
-  employeeName: string
-  incomeYtd: string
-  baseThreshold: string
-  baseAmount: string
-  excessAmount: string
-  baseInsurance: string
-  excessInsurance: string
-  totalInsurance: string
   formula: string
 }
 
@@ -69,38 +57,4 @@ export function calcAdditionalPremium(
     dueDate: getAdditionalPremiumDueDate(settings.year),
     formula: `Доход ИП: ${dToString(income)}. Порог: ${dToString(threshold)}. Облагаемый доход: ${dToString(taxableIncome)}. Взнос: ${dToString(taxableIncome)} × ${settings.additionalPremiumRate}% = ${dToString(calculated)}. Максимум: ${dToString(max)}. Итого: ${dToString(finalAmount)}.`,
   }
-}
-
-export function calcEmployeeInsurance(
-  settings: TaxSettings,
-  employeeName: string,
-  ytdIncome: string
-): EmployeeInsuranceResult {
-  const income = d(ytdIncome)
-  const threshold = d(settings.insuranceBaseThreshold)
-  const mainRate = d(settings.insuranceMainRate).div(100)
-  const excessRate = d(settings.insuranceExcessRate).div(100)
-
-  const baseAmount = dMin(income, threshold)
-  const excessAmount = dMax(d(0), income.minus(threshold))
-
-  const baseInsurance = dMul(baseAmount, mainRate)
-  const excessInsurance = dMul(excessAmount, excessRate)
-  const total = baseInsurance.plus(excessInsurance)
-
-  return {
-    employeeName,
-    incomeYtd: dToString(income),
-    baseThreshold: dToString(threshold),
-    baseAmount: dToString(baseAmount),
-    excessAmount: dToString(excessAmount),
-    baseInsurance: dToString(baseInsurance),
-    excessInsurance: dToString(excessInsurance),
-    totalInsurance: dToString(total),
-    formula: `Доход: ${dToString(income)}. База: ${dToString(baseAmount)} × ${settings.insuranceMainRate}% = ${dToString(baseInsurance)}. Сверх базы: ${dToString(excessAmount)} × ${settings.insuranceExcessRate}% = ${dToString(excessInsurance)}. Итого: ${dToString(total)}.`,
-  }
-}
-
-export function getInsuranceDueDate(month: number, year: number): string {
-  return getInsurancePremiumDueDate(month, year)
 }

@@ -1,3 +1,3 @@
-export type TableName = 'ipProfiles' | 'taxSettings' | 'holidays' | 'transactions' |
-  'employees' | 'employeeDeductions' | 'payrollRecords' | 'taxCalculations' |
+export type TableName = 'ipProfiles' | 'taxRegimeVersions' | 'taxSettings' | 'holidays' | 'transactions' |
+  'taxObligations' | 'payments' | 'calculationSnapshots' | 'taxCalculations' |
   'calendarEvents' | 'auditLogs' | 'ensRecords' | 'reportRecords'

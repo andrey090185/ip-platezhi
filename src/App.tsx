@@ -14,8 +14,6 @@ import IpSelector from '@/pages/IpSelector'
 import Auth from '@/pages/Auth'
 import Dashboard from '@/pages/Dashboard'
 import IncomeExpenses from '@/pages/IncomeExpenses'
-import Employees from '@/pages/Employees'
-import Payroll from '@/pages/Payroll'
 import TaxCalculation from '@/pages/TaxCalculation'
 import CalendarPage from '@/pages/Calendar'
 import Ens from '@/pages/Ens'
@@ -28,12 +26,19 @@ function App() {
   const {
     setCurrentIp, setTaxSettings, setHolidays, setIsOnboarded, setIpList,
     setUserId, setSyncStatus,
-    theme
+    theme, isOnboarded
   } = useAppStore()
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
   }, [theme])
+
+  // When onboarding completes and isOnboarded becomes true, switch to app route
+  useEffect(() => {
+    if (isOnboarded && route === 'onboarding') {
+      setRoute('app')
+    }
+  }, [isOnboarded, route])
 
   useEffect(() => {
     if (!isFirebaseConfigured()) {
@@ -178,8 +183,6 @@ function App() {
           <Route element={<Layout />}>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/income" element={<IncomeExpenses />} />
-            <Route path="/employees" element={<Employees />} />
-            <Route path="/payroll" element={<Payroll />} />
             <Route path="/taxes" element={<TaxCalculation />} />
             <Route path="/calendar" element={<CalendarPage />} />
             <Route path="/ens" element={<Ens />} />

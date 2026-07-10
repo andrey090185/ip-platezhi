@@ -3,7 +3,7 @@ import { useAppStore } from '@/store/appStore'
 import { logout } from '@/firebase/auth'
 import { isFirebaseConfigured } from '@/firebase/config'
 import {
-  LayoutDashboard, Receipt, Users, Calculator, CalendarDays,
+  LayoutDashboard, Receipt, Calculator, CalendarDays,
   Wallet, FileText, Settings, Menu, X, Building2, LogOut,
   Cloud, CloudOff, Loader2
 } from 'lucide-react'
@@ -11,15 +11,9 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 
 const navItems = [
-  { to: '/dashboard', icon: LayoutDashboard, label: 'Главная' },
-  { to: '/ips', icon: Building2, label: 'Мои ИП' },
-  { to: '/income', icon: Receipt, label: 'Доходы и расходы' },
-  { to: '/employees', icon: Users, label: 'Сотрудники' },
-  { to: '/payroll', icon: Calculator, label: 'Зарплата' },
-  { to: '/taxes', icon: Wallet, label: 'Расчёт налогов' },
-  { to: '/calendar', icon: CalendarDays, label: 'Календарь' },
-  { to: '/ens', icon: Wallet, label: 'ЕНС' },
-  { to: '/reports', icon: FileText, label: 'Отчёты' },
+  { to: '/dashboard', icon: LayoutDashboard, label: 'Обзор' },
+  { to: '/income', icon: Receipt, label: 'Операции' },
+  { to: '/taxes', icon: Calculator, label: 'Платежи' },
   { to: '/settings', icon: Settings, label: 'Настройки' },
 ]
 

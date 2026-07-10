@@ -41,7 +41,6 @@ export default function IncomeExpenses() {
     if (currentIp?.id) loadTransactions()
   }, [currentIp])
 
-  // Auto-open form when navigated with ?type=income or ?type=expense
   useEffect(() => {
     const typeParam = searchParams.get('type')
     if (typeParam === 'income' || typeParam === 'expense') {
@@ -68,6 +67,9 @@ export default function IncomeExpenses() {
         ipId: currentIp.id,
         ...form,
         period,
+        importSource: null,
+        importBatchId: null,
+        status: 'accounted' as const,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       })
@@ -138,6 +140,9 @@ export default function IncomeExpenses() {
         usnRelevant: true,
         ndsRelevant: false,
         period: (r['Дата'] || r['date'] || now).substring(0, 7),
+        importSource: 'csv',
+        importBatchId: null,
+        status: 'accounted' as const,
         createdAt: now,
         updatedAt: now,
       }))
@@ -165,7 +170,7 @@ export default function IncomeExpenses() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Доходы и расходы</h1>
+        <h1 className="text-2xl font-bold">Операции</h1>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={handleExport}>
             <Download className="w-4 h-4 mr-1" /> Экспорт
@@ -242,12 +247,12 @@ export default function IncomeExpenses() {
           <CardContent><MoneyDisplay amount={totalIncome.toFixed(2)} size="lg" className="text-green-600" /></CardContent>
         </Card>
         <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Расходы</CardTitle></CardHeader>
+          <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Расходы (статистика)</CardTitle></CardHeader>
           <CardContent><MoneyDisplay amount={totalExpenses.toFixed(2)} size="lg" className="text-red-600" /></CardContent>
         </Card>
         <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">База УСН</CardTitle></CardHeader>
-          <CardContent><MoneyDisplay amount={totalIncome.minus(totalExpenses).toFixed(2)} size="lg" /></CardContent>
+          <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">База УСН (доходы)</CardTitle></CardHeader>
+          <CardContent><MoneyDisplay amount={totalIncome.toFixed(2)} size="lg" /></CardContent>
         </Card>
       </div>
 

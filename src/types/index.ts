@@ -1,13 +1,10 @@
 export type UsnObject = 'income' | 'income_minus_expenses'
 export type PaymentStatus = 'planned' | 'paid' | 'overdue' | 'draft'
 export type TransactionType = 'income' | 'expense' | 'return_income' | 'return_expense'
-export type EmployeeStatus = 'active' | 'archived'
-export type ContractType = 'labor' | 'gph'
-export type TaxResidentStatus = 'resident' | 'non_resident'
 export type CalendarEventType = 'payment' | 'notification' | 'report' | 'reminder'
 export type ReportStatus = 'planned' | 'prepared' | 'submitted' | 'overdue'
 export type NdsMode = 'standard' | 'special_5' | 'special_7'
-export type PayrollPeriod = 'first_half' | 'second_half'
+export type ObligationStatus = 'draft' | 'calculated' | 'due' | 'paid' | 'overdue'
 
 export interface IpProfile {
   id?: number
@@ -16,8 +13,9 @@ export interface IpProfile {
   region: string
   year: number
   usnObject: UsnObject
-  hasEmployees: boolean
-  employeeCount: number
+  registrationDate: string | null
+  ifnsCode: string
+  oktmo: string
   ndsEnabled: boolean
   createdAt: string
   updatedAt: string
@@ -39,10 +37,6 @@ export interface TaxSettings {
   additionalPremiumRate: number
   additionalPremiumMax: number
   considerAdditionalInCurrentYear: boolean
-  insuranceBaseThreshold: number
-  insuranceMainRate: number
-  insuranceExcessRate: number
-  traumaRate: number
   ndsThreshold: number
   ndsMode: NdsMode
   reducedTariffEnabled: boolean
@@ -71,82 +65,69 @@ export interface Transaction {
   usnRelevant: boolean
   ndsRelevant: boolean
   period: string
+  importSource: string | null
+  importBatchId: string | null
+  status: 'accounted' | 'not_accounted' | 'needs_review'
   createdAt: string
   updatedAt: string
 }
 
-export interface Employee {
+export interface TaxObligation {
   id?: number
   ipId: number
-  fullName: string
-  personnelNumber: string
-  hireDate: string
-  fireDate: string | null
-  contractType: ContractType
-  taxResidentStatus: TaxResidentStatus
-  salary: string
-  traumaRate: string | null
-  reducedTariff: boolean
-  status: EmployeeStatus
+  type: 'usn_advance' | 'usn_annual' | 'ip_premium_fixed' | 'ip_premium_additional' | 'notification'
+  period: string
+  amount: string
+  dueDate: string
+  internalDeadline: string | null
+  status: ObligationStatus
+  paidAmount: string
+  paidDate: string | null
+  paymentComment: string
+  calculationSnapshotId: number | null
   createdAt: string
   updatedAt: string
 }
 
-export interface EmployeeDeduction {
+export interface Payment {
   id?: number
-  employeeId: number
+  ipId: number
+  obligationId: number | null
+  date: string
+  amount: string
+  description: string
+  createdAt: string
+}
+
+export interface CalculationSnapshot {
+  id?: number
   ipId: number
   type: string
+  period: string
+  ruleSetVersion: string
+  inputs: string // JSON
+  result: string // JSON
+  trace: string // JSON: CalculationTrace
+  createdAt: string
+}
+
+export interface CalculationTrace {
+  period: string
+  calculationDate: string
+  ruleSetVersion: string
+  steps: CalculationStep[]
+  warnings: string[]
+  excludedTransactions: number[]
+  rounding: string
+  normativeSource: string
+  normativeDate: string
+}
+
+export interface CalculationStep {
+  label: string
+  detail: string
   amount: string
-  dateFrom: string
-  dateTo: string
-  comment: string
-  createdAt: string
-}
-
-export interface PayrollRecord {
-  id?: number
-  ipId: number
-  employeeId: number
-  period: string
-  periodType: PayrollPeriod
-  baseSalary: string
-  bonus: string
-  sickLeave: string
-  nonTaxable: string
-  deductions: string
-  ndflAmount: string
-  netPay: string
-  insuranceAmount: string
-  traumaAmount: string
-  totalIncomeYtd: string
-  ndflRate: string
-  ndflManualOverride: string | null
-  insuranceManualOverride: string | null
-  overrideReason: string
-  createdAt: string
-  updatedAt: string
-}
-
-export interface TaxCalculation {
-  id?: number
-  ipId: number
-  type: 'usn_advance' | 'usn_annual' | 'ip_premium_fixed' | 'ip_premium_additional' | 'ndfl' | 'insurance' | 'trauma' | 'nds'
-  period: string
-  base: string
-  rate: string
-  calculatedAmount: string
-  reductions: string
-  paidAmount: string
-  dueAmount: string
-  dueDate: string
-  notificationRequired: boolean
-  notificationDate: string | null
-  manualOverride: string | null
-  overrideReason: string
-  status: PaymentStatus
-  createdAt: string
-  updatedAt: string
+  links?: { type: string; id: number; label: string }[]
 }
 
 export interface CalendarEvent {
@@ -158,8 +139,7 @@ export interface CalendarEvent {
   description: string
   amount: string | null
   period: string | null
-  taxCalcId: number | null
-  reportName: string | null
+  obligationId: number | null
   internalDeadline: string | null
   status: PaymentStatus
   comment: string
@@ -201,4 +181,31 @@ export interface ReportRecord {
   comment: string
   createdAt: string
   updatedAt: string
+}
+
+// Tax regime versioning
+export interface TaxRegimeVersion {
+  id?: number
+  ipId: number
+  regime: UsnObject
+  rate: number
+  effectiveFrom: string
+  effectiveTo: string | null
+  createdAt: string
+}
+
+// Rule set for a given year
+export interface RuleSet {
+  year: number
+  version: string
+  fixedPremium: number
+  additionalPremiumThreshold: number
+  additionalPremiumRate: number
+  additionalPremiumMax: number
+  usnIncomeLimit: number
+  usnAssetLimit: number
+  ndsThreshold: number
+  ndsMainRate: number
+  effectiveFrom: string
+  holidays: { date: string; name: string }[]
 }
