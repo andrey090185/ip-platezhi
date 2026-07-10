@@ -9,11 +9,6 @@ import type { TableName } from './types'
 
 type SyncStatus = 'synced' | 'syncing' | 'offline' | 'error'
 
-// ---------------------------------------------------------------------------
-// Session — the currently logged-in user. Set once on auth change (App.tsx),
-// read everywhere else. This lets the sync layer work without threading the
-// userId through every page/repo call.
-// ---------------------------------------------------------------------------
 let sessionUserId: string | null = null
 
 export function setSyncUser(uid: string | null): void {
@@ -24,26 +19,21 @@ export function getSyncUser(): string | null {
   return sessionUserId
 }
 
-// Optional callback so the UI can show sync status (Cloud / spinner / error).
 let onStatus: ((status: SyncStatus) => void) | null = null
 
 export function setSyncStatusHandler(fn: ((status: SyncStatus) => void) | null): void {
   onStatus = fn
 }
 
-// ---------------------------------------------------------------------------
-// Canonical list of every table we sync: [local Dexie table, cloud name].
-// Keeping it in one place avoids the "forgot a table" class of bugs.
-// ---------------------------------------------------------------------------
 const CANON: [any, TableName][] = [
   [db.ipProfiles, 'ipProfiles'],
+  [db.taxRegimeVersions, 'taxRegimeVersions'],
   [db.taxSettings, 'taxSettings'],
   [db.holidays, 'holidays'],
   [db.transactions, 'transactions'],
-  [db.employees, 'employees'],
-  [db.employeeDeductions, 'employeeDeductions'],
-  [db.payrollRecords, 'payrollRecords'],
-  [db.taxCalculations, 'taxCalculations'],
+  [db.taxObligations, 'taxObligations'],
+  [db.payments, 'payments'],
+  [db.calculationSnapshots, 'calculationSnapshots'],
   [db.calendarEvents, 'calendarEvents'],
   [db.auditLogs, 'auditLogs'],
   [db.ensRecords, 'ensRecords'],
@@ -65,11 +55,6 @@ function resolveUser(userId?: string | null): string | null {
   return userId || sessionUserId
 }
 
-// ---------------------------------------------------------------------------
-// Per-record helpers (kept for backwards compatibility with repositories).
-// They now fall back to the session user, so they work even when a repo does
-// not pass a userId explicitly.
-// ---------------------------------------------------------------------------
 export async function syncAdd(userId: string | undefined, dexieTable: any, id: number, data: any): Promise<void> {
   const uid = resolveUser(userId)
   const table = getTable(dexieTable)
@@ -106,7 +91,6 @@ export async function syncDelete(userId: string | undefined, dexieTable: any, id
   }
 }
 
-// Push one full table: IndexedDB → Firebase.
 export async function syncFullTable(userId: string | undefined, dexieTable: any, table: TableName): Promise<void> {
   const uid = resolveUser(userId)
   if (!uid) return
@@ -118,12 +102,6 @@ export async function syncFullTable(userId: string | undefined, dexieTable: any,
   }
 }
 
-// ---------------------------------------------------------------------------
-// Automatic full-database sync.
-// A Dexie hook (see syncHooks.ts) calls scheduleSync() on every local change.
-// We debounce and then push the whole database to the cloud, so no write path
-// can ever be "forgotten". `suppress` stops this while we mirror cloud → local.
-// ---------------------------------------------------------------------------
 let syncTimer: ReturnType<typeof setTimeout> | null = null
 let suppressed = false
 
@@ -153,7 +131,6 @@ export function scheduleSync(): void {
   }, 1500)
 }
 
-// Push every table up to the cloud (used by migration and by auto-sync).
 export async function pushAllToCloud(userId: string): Promise<void> {
   if (!userId) return
   for (const [dexieTable, name] of CANON) {
@@ -161,8 +138,6 @@ export async function pushAllToCloud(userId: string): Promise<void> {
   }
 }
 
-// Replace the local database with the cloud copy (cloud is the source of truth
-// on login). Sync is suppressed so mirroring does not immediately push back.
 export async function mirrorAllFromCloud(userId: string): Promise<void> {
   if (!userId) return
   suppressSync(true)
@@ -185,15 +160,11 @@ export async function mirrorAllFromCloud(userId: string): Promise<void> {
   }
 }
 
-// Does the cloud already hold data for this user? We use the IP profile table
-// as the anchor — without an IP nothing else is meaningful.
 export async function cloudHasData(userId: string): Promise<boolean> {
   const ips = await syncTableFromCloud(userId, 'ipProfiles')
   return Object.keys(ips).length > 0
 }
 
-// Called right after login: pull the cloud copy down, or (first time) push the
-// local copy up so existing on-device data is not lost.
 export async function syncOnLogin(userId: string): Promise<void> {
   if (!userId) return
   if (await cloudHasData(userId)) {
@@ -203,9 +174,6 @@ export async function syncOnLogin(userId: string): Promise<void> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Legacy helpers kept so existing imports keep compiling.
-// ---------------------------------------------------------------------------
 export async function loadFromCloud(userId: string, table: TableName, dexieTable: any): Promise<void> {
   if (!userId) return
   try {

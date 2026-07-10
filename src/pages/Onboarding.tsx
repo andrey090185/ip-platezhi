@@ -7,9 +7,8 @@ import { Label } from '@/components/ui/label'
 import { db } from '@/db/schema'
 import { useAppStore } from '@/store/appStore'
 import { ipRepo } from '@/db/repositories/ipRepo'
-import { seedTaxSettings, seedHolidays, seedDemoTransactions } from '@/db/seed'
+import { seedTaxSettings, seedHolidays } from '@/db/seed'
 import { settingsRepo } from '@/db/repositories/settingsRepo'
-import { getSyncUser, pushAllToCloud } from '@/firebase/syncManager'
 import type { IpProfile } from '@/types'
 import { ChevronRight, ChevronLeft, Check, ArrowLeft } from 'lucide-react'
 
@@ -29,16 +28,15 @@ export default function Onboarding() {
     region: 'Москва',
     year: 2026,
     usnObject: 'income' as 'income' | 'income_minus_expenses',
-    hasEmployees: false,
-    employeeCount: 0,
     ndsEnabled: false,
+    registrationDate: '',
+    ifnsCode: '',
+    oktmo: '',
     startUsnPaid: '0',
     startPremiumPaid: '0',
-    startNdfPaid: '0',
-    startInsurancePaid: '0',
   })
 
-  const totalSteps = 6
+  const totalSteps = 4
 
   const handleFinish = async () => {
     const now = new Date().toISOString()
@@ -49,9 +47,10 @@ export default function Onboarding() {
       region: data.region,
       year: data.year,
       usnObject: data.usnObject,
-      hasEmployees: data.hasEmployees,
-      employeeCount: data.employeeCount,
       ndsEnabled: data.ndsEnabled,
+      registrationDate: data.registrationDate || null,
+      ifnsCode: data.ifnsCode,
+      oktmo: data.oktmo,
       createdAt: now,
       updatedAt: now,
     } as IpProfile)
@@ -60,7 +59,43 @@ export default function Onboarding() {
 
     await seedTaxSettings(numericId, data.year)
     await seedHolidays(numericId, data.year)
-    await seedDemoTransactions(numericId)
+
+    if (parseFloat(data.startUsnPaid) > 0 || parseFloat(data.startPremiumPaid) > 0) {
+      if (parseFloat(data.startUsnPaid) > 0) {
+        await db.taxObligations.add({
+          ipId: numericId,
+          type: 'usn_advance',
+          period: `${data.year}-start`,
+          amount: '0',
+          dueDate: `${data.year}-01-01`,
+          internalDeadline: null,
+          status: 'paid',
+          paidAmount: data.startUsnPaid,
+          paidDate: now,
+          paymentComment: 'Начальный остаток (введено при онбординге)',
+          calculationSnapshotId: null,
+          createdAt: now,
+          updatedAt: now,
+        } as any)
+      }
+      if (parseFloat(data.startPremiumPaid) > 0) {
+        await db.taxObligations.add({
+          ipId: numericId,
+          type: 'ip_premium_fixed',
+          period: `${data.year}`,
+          amount: '0',
+          dueDate: `${data.year}-12-28`,
+          internalDeadline: null,
+          status: 'paid',
+          paidAmount: data.startPremiumPaid,
+          paidDate: now,
+          paymentComment: 'Начальный остаток (введено при онбординге)',
+          calculationSnapshotId: null,
+          createdAt: now,
+          updatedAt: now,
+        } as any)
+      }
+    }
 
     const ip = await db.ipProfiles.get(numericId)
     const settings = await settingsRepo.getTaxSettings(numericId)
@@ -70,23 +105,6 @@ export default function Onboarding() {
     if (settings) setTaxSettings(settings)
     setHolidays(holidays)
     setIsOnboarded(true)
-
-    // Push the new profile to the cloud BEFORE reloading. Otherwise the
-    // on-login mirror (cloud → local) runs first and erases the new IP,
-    // because the debounced auto-sync has not had time to upload it yet.
-    const uid = getSyncUser()
-    if (uid) {
-      try {
-        await pushAllToCloud(uid)
-      } catch (e) {
-        console.warn('Cloud push after onboarding failed:', e)
-      }
-    }
-
-    // Full reload so App re-runs its startup routing (now there is an IP, it
-    // resolves to the app). A plain navigate() would be bounced back to
-    // /onboarding by the onboarding-scoped router.
-    window.location.href = '/dashboard'
   }
 
   return (
@@ -149,6 +167,25 @@ export default function Onboarding() {
                   onChange={(e) => setData({ ...data, region: e.target.value })}
                 />
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>Код ИФНС</Label>
+                  <Input
+                    value={data.ifnsCode}
+                    onChange={(e) => setData({ ...data, ifnsCode: e.target.value })}
+                    placeholder="7701"
+                    maxLength={4}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>ОКТМО</Label>
+                  <Input
+                    value={data.oktmo}
+                    onChange={(e) => setData({ ...data, oktmo: e.target.value })}
+                    placeholder="45348000"
+                  />
+                </div>
+              </div>
               <div className="space-y-2">
                 <Label>Год расчёта</Label>
                 <Input
@@ -189,63 +226,19 @@ export default function Onboarding() {
                   <div className="text-sm text-muted-foreground">Ставка 15%</div>
                 </button>
               </div>
+              <p className="text-xs text-muted-foreground">
+                Для ИП без сотрудников на УСН «Доходы» налог можно уменьшить на фиксированные взносы до 100%.
+              </p>
             </div>
           )}
 
           {step === 3 && (
             <div className="space-y-4">
-              <h3 className="text-lg font-medium">Есть ли сотрудники?</h3>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={() => setData({ ...data, hasEmployees: true })}
-                  className={`p-4 rounded-lg border-2 text-left transition-colors ${
-                    data.hasEmployees
-                      ? 'border-primary bg-primary/5'
-                      : 'border-border hover:border-primary/50'
-                  }`}
-                >
-                  <div className="font-medium">Да</div>
-                  <div className="text-sm text-muted-foreground">Есть наёмные работники</div>
-                </button>
-                <button
-                  onClick={() => setData({ ...data, hasEmployees: false, employeeCount: 0 })}
-                  className={`p-4 rounded-lg border-2 text-left transition-colors ${
-                    !data.hasEmployees
-                      ? 'border-primary bg-primary/5'
-                      : 'border-border hover:border-primary/50'
-                  }`}
-                >
-                  <div className="font-medium">Нет</div>
-                  <div className="text-sm text-muted-foreground">Работаю один</div>
-                </button>
-              </div>
-            </div>
-          )}
-
-          {step === 4 && (
-            <div className="space-y-4">
-              <h3 className="text-lg font-medium">Количество сотрудников</h3>
-              <div className="space-y-2">
-                <Label>Приблизительное количество</Label>
-                <Input
-                  type="number"
-                  value={data.employeeCount}
-                  onChange={(e) => setData({ ...data, employeeCount: parseInt(e.target.value) || 0 })}
-                  min={0}
-                  max={200}
-                />
-                {data.employeeCount > 10 && (
-                  <p className="text-sm text-amber-600">
-                    При более чем 10 сотрудниках отчётность сдаётся в электронном виде
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-
-          {step === 5 && (
-            <div className="space-y-4">
               <h3 className="text-lg font-medium">НДС</h3>
+              <p className="text-sm text-muted-foreground">
+                НДС при УСН возникает только при превышении порога 60 млн ₽ (с 2025 г.).
+                Если ваши доходы ниже — оставьте «Выключен».
+              </p>
               <div className="grid grid-cols-2 gap-3">
                 <button
                   onClick={() => setData({ ...data, ndsEnabled: true })}
@@ -273,11 +266,11 @@ export default function Onboarding() {
             </div>
           )}
 
-          {step === 6 && (
+          {step === 4 && (
             <div className="space-y-4">
               <h3 className="text-lg font-medium">Стартовые остатки</h3>
               <p className="text-sm text-muted-foreground">
-                Укажите уже уплаченные суммы за текущий год (если есть)
+                Укажите уже уплаченные суммы за текущий год (если есть). Эти данные будут учтены при расчёте налогов.
               </p>
               <div className="space-y-3">
                 <div className="space-y-2">
@@ -294,22 +287,6 @@ export default function Onboarding() {
                     type="number"
                     value={data.startPremiumPaid}
                     onChange={(e) => setData({ ...data, startPremiumPaid: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Уплачено НДФЛ (₽)</Label>
-                  <Input
-                    type="number"
-                    value={data.startNdfPaid}
-                    onChange={(e) => setData({ ...data, startNdfPaid: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Уплачено страховых взносов (₽)</Label>
-                  <Input
-                    type="number"
-                    value={data.startInsurancePaid}
-                    onChange={(e) => setData({ ...data, startInsurancePaid: e.target.value })}
                   />
                 </div>
               </div>
