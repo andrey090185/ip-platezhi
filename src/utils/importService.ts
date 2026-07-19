@@ -175,11 +175,15 @@ function autoDetectColumns(rows: Record<string, string>[]): Record<string, keyof
   if (rows.length === 0) return {}
   const keys = Object.keys(rows[0])
 
-  // Score each column across ALL rows using percentages
-  const totals: Record<string, { date: number; amount: number; type: number; filled: number }> = {}
-  for (const key of keys) totals[key] = { date: 0, amount: 0, type: 0, filled: 0 }
+  // Score each column across ALL rows
+  const totals: Record<string, { date: number; amount: number; type: number; filled: number; textRatio: number }> = {}
+  for (const key of keys) {
+    totals[key] = { date: 0, amount: 0, type: 0, filled: 0, textRatio: 0 }
+  }
 
+  let totalRows = 0
   for (const row of rows) {
+    totalRows++
     for (const key of keys) {
       const val = (row[key] || '').trim()
       if (!val) continue
@@ -203,6 +207,13 @@ function autoDetectColumns(rows: Record<string, string>[]): Record<string, keyof
         t.amount += 0.5
       }
 
+      // Track text ratio (non-numeric, non-date values)
+      const isNumeric = !isNaN(num) && cleaned.length > 0
+      const isDate = /^\d{1,4}[.\-/]\d{1,2}[.\-/]\d{1,4}$/.test(val)
+      if (!isNumeric && !isDate && val.length > 3) {
+        t.textRatio++
+      }
+
       // Type: keywords
       const lower = val.toLowerCase()
       if (lower.includes('доход') || lower.includes('расход') ||
@@ -216,16 +227,20 @@ function autoDetectColumns(rows: Record<string, string>[]): Record<string, keyof
     }
   }
 
-  // Pick best column: must have >30% non-empty values matching the type
+  // Helper: pick the best column for a field
   const bestKey = (field: 'date' | 'amount' | 'type'): string => {
     let best = ''
-    let bestPct = 0
+    let bestCount = 0
     for (const key of keys) {
       const t = totals[key]
-      if (t.filled === 0) continue
-      const pct = t[field] / t.filled
-      if (pct > bestPct && pct >= 0.3) {
-        bestPct = pct
+      // For amount: skip columns where most non-empty values are text (>80% text ratio)
+      if (field === 'amount' && t.filled > 0) {
+        const textPct = t.textRatio / t.filled
+        if (textPct > 0.8) continue // skip text-only columns for amount
+      }
+      const count = t[field]
+      if (count > bestCount && count > 0) {
+        bestCount = count
         best = key
       }
     }
@@ -239,6 +254,27 @@ function autoDetectColumns(rows: Record<string, string>[]): Record<string, keyof
   if (ak) result[ak.toLowerCase().trim()] = 'amount'
   const tk = bestKey('type')
   if (tk) result[tk.toLowerCase().trim()] = 'type'
+
+  // Special case: if no single amount column found, look for debit/credit pair
+  if (!ak) {
+    const headerKeys = keys.map(k => k.toLowerCase().trim())
+    const debitKey = headerKeys.find(k => k.includes('дебет') || k.includes('debit'))
+    const creditKey = headerKeys.find(k => k.includes('кредит') || k.includes('credit'))
+    // If both debit and credit columns exist, use the one with more numeric values
+    for (const candidate of [debitKey, creditKey]) {
+      if (candidate && (!ak || (totals[candidate]?.amount || 0) > (totals[ak]?.amount || 0))) {
+        // Check it actually has amounts (not just headers like "Дебет")
+        if ((totals[candidate]?.amount || 0) > (totals[candidate]?.textRatio || 0)) {
+          // Also try to combine debit+credit: map the same field twice?
+          // Actually just use the better one
+        }
+        if ((totals[candidate]?.amount || 0) >= 2) {
+          result[candidate] = 'amount'
+        }
+      }
+    }
+  }
+
   return result
 }
 
