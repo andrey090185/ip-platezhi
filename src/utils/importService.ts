@@ -162,26 +162,130 @@ function parseBool(v: string, fallback: boolean): boolean {
   return fallback
 }
 
+/**
+ * Try to auto-detect which column contains what data by scanning values.
+ * Returns a map of lowercased header -> field name only for fields it can detect.
+ * Used as fallback when FIELD_MAP matching produces no results.
+ */
+function autoDetectColumns(rows: Record<string, string>[]): Record<string, keyof ImportRow> {
+  if (rows.length === 0) return {}
+  const keys = Object.keys(rows[0])
+  const sampleSize = Math.min(10, rows.length)
+  const samples = rows.slice(0, sampleSize)
+
+  // Score each column for different data types
+  const scores: Record<string, { date: number; amount: number; type: number }> = {}
+  for (const key of keys) scores[key] = { date: 0, amount: 0, type: 0 }
+
+  for (const row of samples) {
+    for (const key of keys) {
+      const val = (row[key] || '').trim()
+      if (!val) continue
+      const s = scores[key]
+
+      // --- Date detection ---
+      // DD.MM.YYYY or DD/MM/YYYY or DD-MM-YYYY
+      if (/^\d{2}[.\-/]\d{2}[.\-/]\d{2,4}$/.test(val)) s.date++
+      // YYYY-MM-DD
+      else if (/^\d{4}[.\-/]\d{2}[.\-/]\d{2}$/.test(val)) s.date++
+      // DD.MM.YY
+      else if (/^\d{2}[.\-/]\d{2}[.\-/]\d{2}$/.test(val)) s.date++
+
+      // --- Amount detection ---
+      const cleaned = val.replace(/[^\d.,\-]/g, '').replace(/,/g, '.')
+      const num = Number(cleaned)
+      if (!isNaN(num) && num > 0 && num < 1_000_000_000) {
+        // Check that it's not a date-like number (e.g. "01.01.2025" parsed as number)
+        if (!/^\d{1,2}[.\-/]\d{1,2}[.\-/]\d{1,4}$/.test(val)) {
+          s.amount++
+        }
+      } else if (/[₽€$руб]/.test(val)) {
+        s.amount += 0.5
+      }
+
+      // --- Type detection ---
+      const lower = val.toLowerCase()
+      if (lower.includes('доход') || lower.includes('расход') ||
+          lower.includes('приход') || lower.includes('списание') ||
+          lower.includes('возврат') || lower.includes('income') ||
+          lower.includes('expense')) {
+        s.type++
+      }
+    }
+  }
+
+  // Pick the best column for each field
+  const bestKey = (field: keyof typeof scores[string]) => {
+    let best = ''
+    let bestScore = 0
+    for (const key of keys) {
+      const score = scores[key][field]
+      // Must have at least 2 matches or 20% of samples
+      const minRequired = Math.max(2, Math.ceil(sampleSize * 0.2))
+      if (score > bestScore && score >= minRequired) {
+        bestScore = score
+        best = key
+      }
+    }
+    return best
+  }
+
+  const result: Record<string, keyof ImportRow> = {}
+  const dk = bestKey('date')
+  if (dk) result[dk.toLowerCase().trim()] = 'date'
+  const ak = bestKey('amount')
+  if (ak) result[ak.toLowerCase().trim()] = 'amount'
+  const tk = bestKey('type')
+  if (tk) result[tk.toLowerCase().trim()] = 'type'
+  return result
+}
+
 export function generateBatchId(): string {
   const ts = Date.now().toString(36)
   const rand = Math.random().toString(36).slice(2, 8)
   return `batch_${ts}_${rand}`
 }
 
-export function rowsToTransactions(
+function processRows(
   rawRows: Record<string, string>[],
   ipId: number,
+  extraMapping: Record<string, keyof ImportRow> = {},
 ): ImportResult {
   const now = new Date().toISOString()
   const batchId = generateBatchId()
   const transactions: Omit<Transaction, 'id'>[] = []
   const errors: { row: number; message: string }[] = []
 
+  // Merge FIELD_MAP with extra mapping (extra overrides on conflict)
+  const combinedMap: Record<string, keyof ImportRow> = { ...FIELD_MAP }
+  for (const [key, field] of Object.entries(extraMapping)) {
+    combinedMap[key] = field
+  }
+
   for (let i = 0; i < rawRows.length; i++) {
     const raw = rawRows[i]
-    const mapped = mapRow(raw)
 
-    let date = mapped.date
+    // Map using both FIELD_MAP and auto-detected columns
+    const mapped: Record<string, string> = {}
+    for (const [key, value] of Object.entries(raw)) {
+      const canonical = combinedMap[key.toLowerCase().trim()]
+      if (canonical && !mapped[canonical]) {
+        mapped[canonical] = value
+      }
+    }
+
+    const importRow: ImportRow = {
+      date: mapped.date ?? '',
+      type: mapped.type ?? '',
+      amount: mapped.amount ?? '',
+      category: mapped.category ?? '',
+      counterparty: mapped.counterparty ?? '',
+      comment: mapped.comment ?? '',
+      usnRelevant: mapped.usnRelevant ?? 'true',
+      ndsRelevant: mapped.ndsRelevant ?? 'false',
+    }
+
+    let date = importRow.date
     if (!date) {
       errors.push({ row: i + 2, message: 'Отсутствует дата, используется текущая' })
       date = now.split('T')[0]
@@ -196,7 +300,7 @@ export function rowsToTransactions(
       }
     }
 
-    const rawAmount = mapped.amount
+    const rawAmount = importRow.amount
     let amount = rawAmount
       .replace(/[^\d.,\-]/g, '')  // remove all but digits, dots, commas, dashes
       .replace(/,/g, '.')         // convert all commas to dots
@@ -214,7 +318,7 @@ export function rowsToTransactions(
     }
     amount = Number(amount).toFixed(2)
 
-    const type = detectType(mapped.type)
+    const type = detectType(importRow.type)
     const period = date.substring(0, 7)
 
     transactions.push({
@@ -222,11 +326,11 @@ export function rowsToTransactions(
       date,
       type,
       amount,
-      category: mapped.category,
-      counterparty: mapped.counterparty,
-      comment: mapped.comment,
-      usnRelevant: parseBool(mapped.usnRelevant, true),
-      ndsRelevant: parseBool(mapped.ndsRelevant, false),
+      category: importRow.category,
+      counterparty: importRow.counterparty,
+      comment: importRow.comment,
+      usnRelevant: parseBool(importRow.usnRelevant, true),
+      ndsRelevant: parseBool(importRow.ndsRelevant, false),
       period,
       importSource: 'file',
       importBatchId: batchId,
@@ -237,4 +341,28 @@ export function rowsToTransactions(
   }
 
   return { transactions, errors }
+}
+
+export function rowsToTransactions(
+  rawRows: Record<string, string>[],
+  ipId: number,
+): ImportResult {
+  // First pass: try with FIELD_MAP only
+  let result = processRows(rawRows, ipId)
+
+  // If all rows failed with empty date AND empty amount (headers didn't match),
+  // try auto-detecting columns
+  if (result.transactions.length === 0 && result.errors.length > 0) {
+    const allEmptyDateAndAmount = result.errors.every(e =>
+      e.message.startsWith('Отсутствует дата') || e.message.startsWith('Некорректная сумма: ""')
+    )
+    if (allEmptyDateAndAmount) {
+      const autoMap = autoDetectColumns(rawRows)
+      if (Object.keys(autoMap).length > 0) {
+        result = processRows(rawRows, ipId, autoMap)
+      }
+    }
+  }
+
+  return result
 }

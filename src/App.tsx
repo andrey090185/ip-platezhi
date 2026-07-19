@@ -4,7 +4,6 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { Layout } from '@/components/layout/Layout'
 import { useAppStore } from '@/store/appStore'
 import { ipRepo } from '@/db/repositories/ipRepo'
-import { settingsRepo } from '@/db/repositories/settingsRepo'
 import { onAuthChange } from '@/firebase/auth'
 import { isFirebaseConfigured } from '@/firebase/config'
 import { syncOnLogin, setSyncUser, setSyncStatusHandler } from '@/firebase/syncManager'
@@ -24,7 +23,7 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [route, setRoute] = useState<'loading' | 'auth' | 'onboarding' | 'selector' | 'app'>('loading')
   const {
-    setCurrentIp, setTaxSettings, setHolidays, setIsOnboarded, setIpList,
+    setIsOnboarded,
     setUserId, setSyncStatus,
     theme, isOnboarded
   } = useAppStore()
@@ -33,9 +32,9 @@ function App() {
     document.documentElement.classList.toggle('dark', theme === 'dark')
   }, [theme])
 
-  // When onboarding completes and isOnboarded becomes true, switch to app route
+  // When onboarding completes or IP is selected in selector, switch to app route
   useEffect(() => {
-    if (isOnboarded && route === 'onboarding') {
+    if (isOnboarded && (route === 'onboarding' || route === 'selector')) {
       setRoute('app')
     }
   }, [isOnboarded, route])
@@ -85,38 +84,7 @@ function App() {
       return
     }
 
-    if (count === 1) {
-      const ip = await ipRepo.get()
-      if (ip) {
-        setCurrentIp(ip)
-        const settings = await settingsRepo.getTaxSettings(ip.id!)
-        if (settings) setTaxSettings(settings)
-        const holidays = await settingsRepo.getHolidays(ip.id!, ip.year)
-        setHolidays(holidays)
-        setIsOnboarded(true)
-      }
-      setRoute('app')
-      setLoading(false)
-      return
-    }
-
-    const lastId = useAppStore.getState().getLastActiveIpId()
-    if (lastId) {
-      const ips = await ipRepo.getAll()
-      const found = ips.find(i => i.id === lastId)
-      if (found) {
-        setCurrentIp(found)
-        const settings = await settingsRepo.getTaxSettings(found.id!)
-        if (settings) setTaxSettings(settings)
-        const holidays = await settingsRepo.getHolidays(found.id!, found.year)
-        setHolidays(holidays)
-        setIsOnboarded(true)
-        setRoute('app')
-        setLoading(false)
-        return
-      }
-    }
-
+    // Always show IP selector as the home page
     setRoute('selector')
     setLoading(false)
   }

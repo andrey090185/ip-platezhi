@@ -10,7 +10,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
   DialogDescription, DialogFooter,
 } from '@/components/ui/dialog'
-import { Plus, Trash2, Building2, Calendar } from 'lucide-react'
+import { Plus, Trash2, Building2 } from 'lucide-react'
 import { EmptyState } from '@/components/shared/EmptyState'
 
 export default function IpSelector() {
