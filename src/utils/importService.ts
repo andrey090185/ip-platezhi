@@ -2,34 +2,108 @@ import type { Transaction, TransactionType } from '@/types'
 
 /** Keys a user might use in CSV/Excel headers. */
 const FIELD_MAP: Record<string, keyof ImportRow> = {
+  // === Date ===
   'дата': 'date',
   'дата операции': 'date',
+  'дата опер': 'date',
+  'дата проводки': 'date',
+  'дата документа': 'date',
+  'date': 'date',
+  'transaction date': 'date',
+  'doc date': 'date',
+  'posting date': 'date',
+
+  // === Type ===
   'тип': 'type',
   'тип операции': 'type',
+  'вид': 'type',
+  'вид операции': 'type',
+  'направление': 'type',
+  'операция': 'type',
+  'type': 'type',
+  'transaction type': 'type',
+
+  // === Amount ===
   'сумма': 'amount',
   'сумма (₽)': 'amount',
   'сумма, ₽': 'amount',
+  'сумма, руб': 'amount',
+  'сумма (руб)': 'amount',
+  'сумма (руб.)': 'amount',
+  'сумма руб': 'amount',
+  'сумма операции': 'amount',
+  'сумма опер': 'amount',
+  'сумма платежа': 'amount',
+  'сумма дохода': 'amount',
+  'сумма расхода': 'amount',
+  'amount': 'amount',
+  'sum': 'amount',
+  'total': 'amount',
+
+  // === Category ===
   'категория': 'category',
+  'категория дохода': 'category',
+  'категория расхода': 'category',
+  'статья': 'category',
+  'статья доходов': 'category',
+  'статья расходов': 'category',
+  'category': 'category',
+  'category name': 'category',
+
+  // === Counterparty ===
   'контрагент': 'counterparty',
+  'контрагент (плательщик)': 'counterparty',
+  'контрагент (получатель)': 'counterparty',
+  'плательщик': 'counterparty',
+  'получатель': 'counterparty',
+  'от кого': 'counterparty',
+  'кому': 'counterparty',
+  'корреспондент': 'counterparty',
+  'наименование': 'counterparty',
+  'имя': 'counterparty',
+  'название': 'counterparty',
+  'counterparty': 'counterparty',
+  'payer': 'counterparty',
+  'receiver': 'counterparty',
+  'payee': 'counterparty',
+  'beneficiary': 'counterparty',
+
+  // === Comment ===
   'комментарий': 'comment',
   'коммент': 'comment',
   'примечание': 'comment',
+  'описание': 'comment',
+  'назначение': 'comment',
+  'назначение платежа': 'comment',
+  'основание': 'comment',
+  'содержание': 'comment',
+  'содержание операции': 'comment',
+  'детали': 'comment',
+  'детали платежа': 'comment',
+  'comment': 'comment',
+  'note': 'comment',
+  'notes': 'comment',
+  'description': 'comment',
+  'purpose': 'comment',
+  'payment purpose': 'comment',
+  'details': 'comment',
+
+  // === USN ===
   'учсн': 'usnRelevant',
   'усн': 'usnRelevant',
   'учитывается в усн': 'usnRelevant',
+  'учитывать в усн': 'usnRelevant',
+  'для усн': 'usnRelevant',
+  'usn': 'usnRelevant',
+  'usn relevant': 'usnRelevant',
+
+  // === NDS ===
   'ндс': 'ndsRelevant',
   'учитывается в ндс': 'ndsRelevant',
-  'date': 'date',
-  'type': 'type',
-  'amount': 'amount',
-  'sum': 'amount',
-  'category': 'category',
-  'counterparty': 'counterparty',
-  'comment': 'comment',
-  'note': 'comment',
-  'description': 'comment',
-  'usn': 'usnRelevant',
+  'учитывать в ндс': 'ndsRelevant',
+  'ставка ндс': 'ndsRelevant',
   'nds': 'ndsRelevant',
+  'vat': 'ndsRelevant',
 }
 
 export interface ImportRow {
@@ -122,9 +196,20 @@ export function rowsToTransactions(
       }
     }
 
-    let amount = mapped.amount.replace(/[^\d.,\-]/g, '').replace(',', '.')
+    const rawAmount = mapped.amount
+    let amount = rawAmount
+      .replace(/[^\d.,\-]/g, '')  // remove all but digits, dots, commas, dashes
+      .replace(/,/g, '.')         // convert all commas to dots
+
+    // If there are multiple dots, keep only the last one (decimal separator)
+    const dotCount = (amount.match(/\./g) || []).length
+    if (dotCount > 1) {
+      const lastDot = amount.lastIndexOf('.')
+      amount = amount.slice(0, lastDot).replace(/\./g, '') + amount.slice(lastDot)
+    }
+
     if (!amount || isNaN(Number(amount)) || Number(amount) < 0) {
-      errors.push({ row: i + 2, message: `Некорректная сумма: "${mapped.amount}"` })
+      errors.push({ row: i + 2, message: `Некорректная сумма: "${rawAmount}"` })
       continue
     }
     amount = Number(amount).toFixed(2)
