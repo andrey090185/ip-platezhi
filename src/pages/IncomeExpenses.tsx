@@ -12,9 +12,10 @@ import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { MoneyDisplay } from '@/components/shared/MoneyDisplay'
 import { transactionRepo } from '@/db/repositories/transactionRepo'
-import { exportToCSV, parseCSV } from '@/utils/csv'
+import { exportToCSV } from '@/utils/csv'
 import type { Transaction } from '@/types'
 import { Plus, Upload, Download, Trash2, Edit } from 'lucide-react'
+import { ImportDialog } from '@/components/shared/ImportDialog'
 import { formatCurrency } from '@/utils/currency'
 import { d, dSum } from '@/engine/decimal'
 
@@ -25,6 +26,7 @@ export default function IncomeExpenses() {
   const [filterMonth, setFilterMonth] = useState<string>('all')
   const [filterType, setFilterType] = useState<string>('all')
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [editingTx, setEditingTx] = useState<Transaction | null>(null)
   const [form, setForm] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -121,37 +123,6 @@ export default function IncomeExpenses() {
     exportToCSV(data, `operacii_${currentIp?.year || 2026}.csv`)
   }
 
-  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file || !currentIp?.id) return
-    const reader = new FileReader()
-    reader.onload = async (ev) => {
-      const text = ev.target?.result as string
-      const rows = parseCSV(text)
-      const now = new Date().toISOString()
-      const txs: Omit<Transaction, 'id'>[] = rows.map(r => ({
-        ipId: currentIp.id!,
-        date: r['Дата'] || r['date'] || now.split('T')[0],
-        type: (r['Тип'] || r['type'] || 'income') as Transaction['type'],
-        amount: r['Сумма'] || r['amount'] || '0',
-        category: r['Категория'] || r['category'] || '',
-        counterparty: r['Контрагент'] || r['counterparty'] || '',
-        comment: r['Комментарий'] || r['comment'] || '',
-        usnRelevant: true,
-        ndsRelevant: false,
-        period: (r['Дата'] || r['date'] || now).substring(0, 7),
-        importSource: 'csv',
-        importBatchId: null,
-        status: 'accounted' as const,
-        createdAt: now,
-        updatedAt: now,
-      }))
-      await transactionRepo.importCSV(currentIp.id, txs)
-      loadTransactions()
-    }
-    reader.readAsText(file)
-  }
-
   const filtered = transactions.filter(t => {
     if (filterMonth !== 'all' && !t.date.startsWith(filterMonth)) return false
     if (filterType !== 'all' && t.type !== filterType) return false
@@ -175,12 +146,9 @@ export default function IncomeExpenses() {
           <Button variant="outline" size="sm" onClick={handleExport}>
             <Download className="w-4 h-4 mr-1" /> Экспорт
           </Button>
-          <label>
-            <Button variant="outline" size="sm" render={<span />}>
-              <Upload className="w-4 h-4 mr-1" /> Импорт
-            </Button>
-            <input type="file" accept=".csv" className="hidden" onChange={handleImport} />
-          </label>
+          <Button variant="outline" size="sm" onClick={() => setImportDialogOpen(true)}>
+            <Upload className="w-4 h-4 mr-1" /> Импорт
+          </Button>
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger render={<Button size="sm" onClick={() => { setEditingTx(null); setForm({ ...form, date: new Date().toISOString().split('T')[0], type: 'income', amount: '', category: '', counterparty: '', comment: '', usnRelevant: true, ndsRelevant: false }) }} />}>
               <Plus className="w-4 h-4 mr-1" /> Добавить
@@ -321,6 +289,13 @@ export default function IncomeExpenses() {
           </Table>
         </Card>
       )}
+
+      <ImportDialog
+        open={importDialogOpen}
+        onOpenChange={setImportDialogOpen}
+        ipId={currentIp.id!}
+        onImported={loadTransactions}
+      />
     </div>
   )
 }

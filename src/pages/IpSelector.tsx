@@ -29,15 +29,13 @@ export default function IpSelector() {
   }
 
   const handleSelectIp = async (ip: any) => {
-    setCurrentIp(ip)
     const settings = await settingsRepo.getTaxSettings(ip.id!)
-    if (settings) setTaxSettings(settings)
     const holidays = await settingsRepo.getHolidays(ip.id!, ip.year)
+    setCurrentIp(ip)
+    if (settings) setTaxSettings(settings)
     setHolidays(holidays)
     setIsOnboarded(true)
-    // Full reload so App re-resolves routing to the app for the selected IP.
-    // A plain navigate() is bounced back to /ips while route === 'selector'.
-    window.location.href = '/dashboard'
+    navigate('/dashboard')
   }
 
   const handleDelete = async () => {

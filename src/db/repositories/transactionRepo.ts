@@ -85,8 +85,10 @@ export const transactionRepo = {
     return { income: income.toFixed(2), expenses: expenses.toFixed(2) }
   },
 
-  async importCSV(ipId: number, records: Omit<Transaction, 'id'>[]): Promise<number> {
-    return db.transactions.bulkAdd(records as Transaction[])
+  async importBatch(ipId: number, records: Omit<Transaction, 'id'>[]): Promise<number> {
+    // Returns the key of the last inserted record
+    const lastKey = await db.transactions.bulkAdd(records as Transaction[])
+    return typeof lastKey === 'number' ? lastKey : 0
   },
 
   async exportCSV(ipId: number): Promise<Transaction[]> {

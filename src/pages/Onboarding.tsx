@@ -105,6 +105,7 @@ export default function Onboarding() {
     if (settings) setTaxSettings(settings)
     setHolidays(holidays)
     setIsOnboarded(true)
+    navigate('/dashboard')
   }
 
   return (

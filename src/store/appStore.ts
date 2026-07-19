@@ -19,6 +19,7 @@ interface AppState {
   setHolidays: (holidays: Holiday[]) => void
   setIsOnboarded: (v: boolean) => void
   setIpList: (list: IpProfile[]) => void
+  switchToIp: (ip: IpProfile, settings: TaxSettings | null, holidays: Holiday[]) => void
   setSidebarOpen: (v: boolean) => void
   setTheme: (theme: 'light' | 'dark') => void
   toggleTheme: () => void
@@ -48,6 +49,17 @@ export const useAppStore = create<AppState>((set) => ({
   setHolidays: (holidays) => set({ holidays }),
   setIsOnboarded: (v) => set({ isOnboarded: v }),
   setIpList: (list) => set({ ipList: list }),
+  switchToIp: (ip, settings, holidays) => {
+    if (ip.id) {
+      localStorage.setItem(LAST_IP_KEY, String(ip.id))
+    }
+    set({
+      currentIp: ip,
+      taxSettings: settings,
+      holidays,
+      isOnboarded: true,
+    })
+  },
   setSidebarOpen: (v) => set({ sidebarOpen: v }),
   setTheme: (theme) => {
     localStorage.setItem('theme', theme)
