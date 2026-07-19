@@ -20,10 +20,14 @@ const FIELD_MAP: Record<string, keyof ImportRow> = {
   'вид операции': 'type',
   'направление': 'type',
   'операция': 'type',
+  'дебет': 'type',
+  'кредит': 'type',
+  'debit': 'type',
+  'credit': 'type',
   'type': 'type',
   'transaction type': 'type',
 
-  // === Amount ===
+  // === Amount (single column) ===
   'сумма': 'amount',
   'сумма (₽)': 'amount',
   'сумма, ₽': 'amount',
@@ -163,67 +167,65 @@ function parseBool(v: string, fallback: boolean): boolean {
 }
 
 /**
- * Try to auto-detect which column contains what data by scanning values.
+ * Try to auto-detect which column contains what data by scanning ALL rows.
  * Returns a map of lowercased header -> field name only for fields it can detect.
  * Used as fallback when FIELD_MAP matching produces no results.
  */
 function autoDetectColumns(rows: Record<string, string>[]): Record<string, keyof ImportRow> {
   if (rows.length === 0) return {}
   const keys = Object.keys(rows[0])
-  const sampleSize = Math.min(10, rows.length)
-  const samples = rows.slice(0, sampleSize)
 
-  // Score each column for different data types
-  const scores: Record<string, { date: number; amount: number; type: number }> = {}
-  for (const key of keys) scores[key] = { date: 0, amount: 0, type: 0 }
+  // Score each column across ALL rows using percentages
+  const totals: Record<string, { date: number; amount: number; type: number; filled: number }> = {}
+  for (const key of keys) totals[key] = { date: 0, amount: 0, type: 0, filled: 0 }
 
-  for (const row of samples) {
+  for (const row of rows) {
     for (const key of keys) {
       const val = (row[key] || '').trim()
       if (!val) continue
-      const s = scores[key]
+      const t = totals[key]
+      t.filled++
 
-      // --- Date detection ---
-      // DD.MM.YYYY or DD/MM/YYYY or DD-MM-YYYY
-      if (/^\d{2}[.\-/]\d{2}[.\-/]\d{2,4}$/.test(val)) s.date++
-      // YYYY-MM-DD
-      else if (/^\d{4}[.\-/]\d{2}[.\-/]\d{2}$/.test(val)) s.date++
-      // DD.MM.YY
-      else if (/^\d{2}[.\-/]\d{2}[.\-/]\d{2}$/.test(val)) s.date++
+      // Date: DD.MM.YYYY or DD/MM/YYYY or DD-MM-YYYY or YYYY-MM-DD
+      if (/^\d{2}[.\-/]\d{2}[.\-/]\d{2,4}$/.test(val) ||
+          /^\d{4}[.\-/]\d{2}[.\-/]\d{2}$/.test(val)) {
+        t.date++
+      }
 
-      // --- Amount detection ---
+      // Amount: clean positive number (not a date)
       const cleaned = val.replace(/[^\d.,\-]/g, '').replace(/,/g, '.')
       const num = Number(cleaned)
       if (!isNaN(num) && num > 0 && num < 1_000_000_000) {
-        // Check that it's not a date-like number (e.g. "01.01.2025" parsed as number)
         if (!/^\d{1,2}[.\-/]\d{1,2}[.\-/]\d{1,4}$/.test(val)) {
-          s.amount++
+          t.amount++
         }
-      } else if (/[₽€$руб]/.test(val)) {
-        s.amount += 0.5
+      } else if (/[₽€$]/.test(val)) {
+        t.amount += 0.5
       }
 
-      // --- Type detection ---
+      // Type: keywords
       const lower = val.toLowerCase()
       if (lower.includes('доход') || lower.includes('расход') ||
           lower.includes('приход') || lower.includes('списание') ||
-          lower.includes('возврат') || lower.includes('income') ||
-          lower.includes('expense')) {
-        s.type++
+          lower.includes('возврат') || lower.includes('дебет') ||
+          lower.includes('кредит') || lower.includes('income') ||
+          lower.includes('expense') || lower.includes('debit') ||
+          lower.includes('credit')) {
+        t.type++
       }
     }
   }
 
-  // Pick the best column for each field
-  const bestKey = (field: keyof typeof scores[string]) => {
+  // Pick best column: must have >30% non-empty values matching the type
+  const bestKey = (field: 'date' | 'amount' | 'type'): string => {
     let best = ''
-    let bestScore = 0
+    let bestPct = 0
     for (const key of keys) {
-      const score = scores[key][field]
-      // Must have at least 2 matches or 20% of samples
-      const minRequired = Math.max(2, Math.ceil(sampleSize * 0.2))
-      if (score > bestScore && score >= minRequired) {
-        bestScore = score
+      const t = totals[key]
+      if (t.filled === 0) continue
+      const pct = t[field] / t.filled
+      if (pct > bestPct && pct >= 0.3) {
+        bestPct = pct
         best = key
       }
     }
