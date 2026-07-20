@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Layout } from '@/components/layout/Layout'
 import { useAppStore } from '@/store/appStore'
@@ -8,25 +8,38 @@ import { onAuthChange } from '@/firebase/auth'
 import { isFirebaseConfigured } from '@/firebase/config'
 import { syncOnLogin, setSyncUser, setSyncStatusHandler } from '@/firebase/syncManager'
 
-import Onboarding from '@/pages/Onboarding'
-import IpSelector from '@/pages/IpSelector'
-import Auth from '@/pages/Auth'
-import Dashboard from '@/pages/Dashboard'
-import IncomeExpenses from '@/pages/IncomeExpenses'
-import TaxCalculation from '@/pages/TaxCalculation'
-import CalendarPage from '@/pages/Calendar'
-import Ens from '@/pages/Ens'
-import Reports from '@/pages/Reports'
-import Settings from '@/pages/Settings'
+const Onboarding = lazy(() => import('@/pages/Onboarding'))
+const IpSelector = lazy(() => import('@/pages/IpSelector'))
+const Auth = lazy(() => import('@/pages/Auth'))
+const Dashboard = lazy(() => import('@/pages/Dashboard'))
+const IncomeExpenses = lazy(() => import('@/pages/IncomeExpenses'))
+const TaxCalculation = lazy(() => import('@/pages/TaxCalculation'))
+const Settings = lazy(() => import('@/pages/Settings'))
+
+function PageFallback() {
+  return <div className="min-h-[50vh] grid place-items-center text-sm text-muted-foreground">Загружаем раздел…</div>
+}
 
 function App() {
   const [loading, setLoading] = useState(true)
   const [route, setRoute] = useState<'loading' | 'auth' | 'onboarding' | 'selector' | 'app'>('loading')
   const {
-    setIsOnboarded,
     setUserId, setSyncStatus,
-    theme, isOnboarded
+    resetWorkspace, theme, isOnboarded
   } = useAppStore()
+
+  const initAppLocal = useCallback(async () => {
+    const count = await ipRepo.getCount()
+
+    if (count === 0) {
+      setRoute('onboarding')
+      setLoading(false)
+      return
+    }
+
+    setRoute('selector')
+    setLoading(false)
+  }, [])
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
@@ -49,6 +62,7 @@ function App() {
     setSyncStatusHandler(setSyncStatus)
 
     const unsubscribe = onAuthChange(async (user) => {
+      resetWorkspace()
       if (user) {
         setUserId(user.uid)
         setSyncUser(user.uid)
@@ -73,21 +87,7 @@ function App() {
     })
 
     return () => unsubscribe()
-  }, [])
-
-  const initAppLocal = async () => {
-    const count = await ipRepo.getCount()
-
-    if (count === 0) {
-      setRoute('onboarding')
-      setLoading(false)
-      return
-    }
-
-    // Always show IP selector as the home page
-    setRoute('selector')
-    setLoading(false)
-  }
+  }, [initAppLocal, resetWorkspace, setSyncStatus, setUserId])
 
   if (loading || route === 'loading') {
     return (
@@ -106,9 +106,9 @@ function App() {
     return (
       <TooltipProvider>
         <BrowserRouter>
-          <Routes>
+          <Suspense fallback={<PageFallback />}><Routes>
             <Route path="*" element={<Auth />} />
-          </Routes>
+          </Routes></Suspense>
         </BrowserRouter>
       </TooltipProvider>
     )
@@ -118,10 +118,10 @@ function App() {
     return (
       <TooltipProvider>
         <BrowserRouter>
-          <Routes>
+          <Suspense fallback={<PageFallback />}><Routes>
             <Route path="/onboarding" element={<Onboarding />} />
             <Route path="*" element={<Navigate to="/onboarding" replace />} />
-          </Routes>
+          </Routes></Suspense>
         </BrowserRouter>
       </TooltipProvider>
     )
@@ -131,11 +131,11 @@ function App() {
     return (
       <TooltipProvider>
         <BrowserRouter>
-          <Routes>
+          <Suspense fallback={<PageFallback />}><Routes>
             <Route path="/ips" element={<IpSelector />} />
             <Route path="/onboarding" element={<Onboarding />} />
             <Route path="*" element={<Navigate to="/ips" replace />} />
-          </Routes>
+          </Routes></Suspense>
         </BrowserRouter>
       </TooltipProvider>
     )
@@ -144,7 +144,7 @@ function App() {
   return (
     <TooltipProvider>
       <BrowserRouter>
-        <Routes>
+        <Suspense fallback={<PageFallback />}><Routes>
           <Route path="/auth" element={<Auth />} />
           <Route path="/onboarding" element={<Onboarding />} />
           <Route path="/ips" element={<IpSelector />} />
@@ -152,13 +152,13 @@ function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/income" element={<IncomeExpenses />} />
             <Route path="/taxes" element={<TaxCalculation />} />
-            <Route path="/calendar" element={<CalendarPage />} />
-            <Route path="/ens" element={<Ens />} />
-            <Route path="/reports" element={<Reports />} />
+            <Route path="/calendar" element={<Navigate to="/taxes" replace />} />
+            <Route path="/ens" element={<Navigate to="/taxes" replace />} />
+            <Route path="/reports" element={<Navigate to="/income" replace />} />
             <Route path="/settings" element={<Settings />} />
           </Route>
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
-        </Routes>
+        </Routes></Suspense>
       </BrowserRouter>
     </TooltipProvider>
   )

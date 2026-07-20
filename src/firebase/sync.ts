@@ -1,4 +1,4 @@
-import { ref, set, get, remove, push, onValue, off } from 'firebase/database'
+import { ref, set, update, get, remove, push, onValue, off } from 'firebase/database'
 import { db } from './config'
 import type { TableName } from './types'
 
@@ -14,7 +14,9 @@ export async function syncTableToCloud(userId: string, table: TableName, data: a
     const id = String(item.id || push(ref(db, path)).key)
     map[id] = { ...item, id: undefined }
   }
-  await set(dbRef, map)
+  // Merge records instead of replacing the whole table. Deletions are sent as
+  // explicit per-record operations, so one stale device cannot erase another.
+  if (Object.keys(map).length) await update(dbRef, map)
 }
 
 export async function syncRecordToCloud(userId: string, table: TableName, id: number, data: any): Promise<void> {

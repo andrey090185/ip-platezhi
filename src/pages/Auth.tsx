@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { register, login } from '@/firebase/auth'
 import { isFirebaseConfigured } from '@/firebase/config'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, ArrowRight, LockKeyhole } from 'lucide-react'
 
 export default function Auth() {
   const navigate = useNavigate()
@@ -18,11 +18,9 @@ export default function Auth() {
 
   if (!isFirebaseConfigured()) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <div className="onboarding-shell">
+        <div className="onboarding-brand"><div className="brand-mark"><span>ИП</span></div><div><strong>ИП Платежи</strong><small>Контроль доходов и налогов</small></div></div>
         <Card className="w-full max-w-md">
-          <CardHeader>
-            <CardTitle>ИП Платежи</CardTitle>
-          </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center gap-3 p-3 rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-950 dark:border-amber-800">
               <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
@@ -31,7 +29,7 @@ export default function Auth() {
               </p>
             </div>
             <Button onClick={() => navigate('/onboarding')} className="w-full">
-              Продолжить без аккаунта
+              Продолжить локально <ArrowRight className="size-4" />
             </Button>
           </CardContent>
         </Card>
@@ -50,46 +48,35 @@ export default function Auth() {
         await register(email, password)
       }
       navigate('/dashboard')
-    } catch (err: any) {
-      setError(err.message || 'Ошибка авторизации')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Ошибка авторизации')
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <span className="text-primary-foreground font-bold text-sm">ИП</span>
-            </div>
-            <CardTitle>ИП Платежи</CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex gap-2">
-            <Button
-              variant={isLogin ? 'default' : 'outline'}
-              onClick={() => setIsLogin(true)}
-              className="flex-1"
-            >
-              Вход
-            </Button>
-            <Button
-              variant={!isLogin ? 'default' : 'outline'}
-              onClick={() => setIsLogin(false)}
-              className="flex-1"
-            >
-              Регистрация
-            </Button>
+    <div className="auth-shell">
+      <div className="auth-intro">
+        <div className="onboarding-brand"><div className="brand-mark"><span>ИП</span></div><div><strong>ИП Платежи</strong><small>Control center</small></div></div>
+        <p className="eyebrow">ФИНАНСЫ БЕЗ ШУМА</p>
+        <h1>Все ваши ИП.<br />Один понятный контур.</h1>
+        <p>Доходы, обязательства, сроки и фактические платежи — раздельно по каждому профилю.</p>
+        <div className="auth-security"><LockKeyhole className="size-4" /><span>Доступ к данным защищён вашей учётной записью.</span></div>
+      </div>
+      <Card className="auth-card">
+        <CardContent className="space-y-5">
+          <div><p className="eyebrow">ДОБРО ПОЖАЛОВАТЬ</p><h2>{isLogin ? 'Войти в приложение' : 'Создать аккаунт'}</h2><p>{isLogin ? 'Продолжите работу со своими профилями.' : 'Настройка первого ИП займёт пару минут.'}</p></div>
+          <div className="segmented-control">
+            <button type="button" className={isLogin ? 'active' : ''} onClick={() => setIsLogin(true)}>Вход</button>
+            <button type="button" className={!isLogin ? 'active' : ''} onClick={() => setIsLogin(false)}>Регистрация</button>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label>Email</Label>
+              <Label htmlFor="auth-email">Email</Label>
               <Input
+                id="auth-email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -98,8 +85,9 @@ export default function Auth() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Пароль</Label>
+              <Label htmlFor="auth-password">Пароль</Label>
               <Input
+                id="auth-password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -112,14 +100,12 @@ export default function Auth() {
               <p className="text-sm text-red-600">{error}</p>
             )}
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? 'Загрузка...' : isLogin ? 'Войти' : 'Зарегистрироваться'}
+              {loading ? 'Загрузка...' : isLogin ? 'Войти' : 'Создать аккаунт'}
+              {!loading && <ArrowRight className="size-4" />}
             </Button>
           </form>
 
-          <p className="text-xs text-muted-foreground text-center">
-            Вход нужен, чтобы ваши данные сохранялись в облаке и были доступны
-            с любого устройства.
-          </p>
+          <p className="text-xs text-muted-foreground text-center">Авторизация нужна для синхронизации между устройствами.</p>
         </CardContent>
       </Card>
     </div>

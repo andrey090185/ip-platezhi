@@ -1,0 +1,18 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "users": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid",
+        "$table": {
+          ".validate": "$table === 'ipProfiles' || $table === 'taxRegimeVersions' || $table === 'taxSettings' || $table === 'holidays' || $table === 'transactions' || $table === 'transactionAllocations' || $table === 'taxObligations' || $table === 'payments' || $table === 'paymentAllocations' || $table === 'calculationSnapshots' || $table === 'calendarEvents' || $table === 'auditLogs' || $table === 'ensRecords' || $table === 'reportRecords'",
+          "$recordId": {
+            ".validate": "newData.hasChildren()"
+          }
+        }
+      }
+    }
+  }
+}

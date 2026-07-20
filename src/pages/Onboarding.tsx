@@ -1,322 +1,200 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { db } from '@/db/schema'
 import { useAppStore } from '@/store/appStore'
 import { ipRepo } from '@/db/repositories/ipRepo'
-import { seedTaxSettings, seedHolidays } from '@/db/seed'
+import { taxCalcRepo } from '@/db/repositories/taxCalcRepo'
+import { paymentRepo } from '@/db/repositories/paymentRepo'
+import { seedHolidays, seedTaxSettings } from '@/db/seed'
 import { settingsRepo } from '@/db/repositories/settingsRepo'
-import type { IpProfile } from '@/types'
-import { ChevronRight, ChevronLeft, Check, ArrowLeft } from 'lucide-react'
+import { d, dMin } from '@/engine/decimal'
+import { ArrowLeft, Check, ChevronLeft, ChevronRight, ShieldCheck } from 'lucide-react'
 
 export default function Onboarding() {
-  const [step, setStep] = useState(1)
   const navigate = useNavigate()
-  const { setCurrentIp, setTaxSettings, setHolidays, setIsOnboarded } = useAppStore()
+  const { switchToIp, setIsOnboarded, userId } = useAppStore()
+  const [step, setStep] = useState(1)
   const [hasExistingIps, setHasExistingIps] = useState(false)
-
-  useEffect(() => {
-    ipRepo.getCount().then(count => setHasExistingIps(count > 0))
-  }, [])
-
+  const [error, setError] = useState('')
   const [data, setData] = useState({
     name: '',
     inn: '',
     region: 'Москва',
     year: 2026,
-    usnObject: 'income' as 'income' | 'income_minus_expenses',
-    ndsEnabled: false,
     registrationDate: '',
     ifnsCode: '',
     oktmo: '',
-    startUsnPaid: '0',
-    startPremiumPaid: '0',
+    openingAccruedUsn: '0',
+    openingPaidUsn: '0',
+    openingPaidPremium: '0',
+    openingPaymentDate: '2026-01-01',
   })
 
-  const totalSteps = 4
+  useEffect(() => { void ipRepo.getCount().then(count => setHasExistingIps(count > 0)) }, [])
 
-  const handleFinish = async () => {
+  const finish = async () => {
+    setError('')
+    if (!/^\d{12}$/.test(data.inn)) {
+      setError('ИНН индивидуального предпринимателя должен содержать 12 цифр.')
+      setStep(1)
+      return
+    }
     const now = new Date().toISOString()
-
-    const ipId = await db.ipProfiles.add({
+    const ipId = await ipRepo.add({
       name: data.name,
       inn: data.inn,
       region: data.region,
       year: data.year,
-      usnObject: data.usnObject,
-      ndsEnabled: data.ndsEnabled,
+      usnObject: 'income',
       registrationDate: data.registrationDate || null,
       ifnsCode: data.ifnsCode,
       oktmo: data.oktmo,
+      ndsEnabled: false,
       createdAt: now,
       updatedAt: now,
-    } as IpProfile)
+    }, userId ?? undefined)
 
-    const numericId = ipId as number
+    await seedTaxSettings(ipId, data.year)
+    await seedHolidays(ipId, data.year)
+    const settings = await settingsRepo.getTaxSettings(ipId)
 
-    await seedTaxSettings(numericId, data.year)
-    await seedHolidays(numericId, data.year)
-
-    if (parseFloat(data.startUsnPaid) > 0 || parseFloat(data.startPremiumPaid) > 0) {
-      if (parseFloat(data.startUsnPaid) > 0) {
-        await db.taxObligations.add({
-          ipId: numericId,
-          type: 'usn_advance',
-          period: `${data.year}-start`,
-          amount: '0',
-          dueDate: `${data.year}-01-01`,
-          internalDeadline: null,
-          status: 'paid',
-          paidAmount: data.startUsnPaid,
-          paidDate: now,
-          paymentComment: 'Начальный остаток (введено при онбординге)',
-          calculationSnapshotId: null,
-          createdAt: now,
-          updatedAt: now,
-        } as any)
-      }
-      if (parseFloat(data.startPremiumPaid) > 0) {
-        await db.taxObligations.add({
-          ipId: numericId,
-          type: 'ip_premium_fixed',
-          period: `${data.year}`,
-          amount: '0',
-          dueDate: `${data.year}-12-28`,
-          internalDeadline: null,
-          status: 'paid',
-          paidAmount: data.startPremiumPaid,
-          paidDate: now,
-          paymentComment: 'Начальный остаток (введено при онбординге)',
-          calculationSnapshotId: null,
-          createdAt: now,
-          updatedAt: now,
-        } as any)
-      }
+    let openingUsnId: number | null = null
+    if (d(data.openingAccruedUsn || 0).gt(0)) {
+      openingUsnId = await taxCalcRepo.add({
+        ipId,
+        type: 'usn_advance',
+        period: `${data.year}-opening`,
+        amount: d(data.openingAccruedUsn).toFixed(2),
+        dueDate: `${data.year}-01-01`,
+        internalDeadline: null,
+        notificationDueDate: null,
+        status: 'calculated',
+        paidAmount: '0.00',
+        paidDate: null,
+        paymentComment: 'Начальные данные',
+        calculationSnapshotId: null,
+        availableReduction: '0.00',
+        usedReduction: '0.00',
+        trace: null,
+        createdAt: now,
+        updatedAt: now,
+      })
     }
 
-    const ip = await db.ipProfiles.get(numericId)
-    const settings = await settingsRepo.getTaxSettings(numericId)
-    const holidays = await settingsRepo.getHolidays(numericId, data.year)
+    if (d(data.openingPaidUsn || 0).gt(0)) {
+      await paymentRepo.add({
+        ipId,
+        obligationId: openingUsnId,
+        allocateAmount: openingUsnId
+          ? dMin(d(data.openingPaidUsn), d(data.openingAccruedUsn)).toFixed(2)
+          : '0.00',
+        date: data.openingPaymentDate,
+        amount: d(data.openingPaidUsn).toFixed(2),
+        description: 'УСН, оплачено до начала работы в приложении',
+        kind: 'usn',
+        period: `${data.year}-opening`,
+        documentNumber: '',
+        comment: 'Начальные данные',
+        source: 'opening',
+        sourceTransactionId: null,
+      })
+    }
 
-    if (ip) setCurrentIp(ip)
-    if (settings) setTaxSettings(settings)
-    setHolidays(holidays)
+    if (settings && d(data.openingPaidPremium || 0).gt(0)) {
+      const fixedId = await taxCalcRepo.add({
+        ipId,
+        type: 'ip_premium_fixed',
+        period: `${data.year}-fixed`,
+        amount: d(settings.fixedPremium).toFixed(2),
+        dueDate: `${data.year}-12-28`,
+        internalDeadline: null,
+        notificationDueDate: null,
+        status: 'calculated',
+        paidAmount: '0.00',
+        paidDate: null,
+        paymentComment: 'Начальные данные',
+        calculationSnapshotId: null,
+        availableReduction: d(settings.fixedPremium).toFixed(2),
+        usedReduction: '0.00',
+        trace: null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      await paymentRepo.add({
+        ipId,
+        obligationId: fixedId,
+        allocateAmount: dMin(d(data.openingPaidPremium), d(settings.fixedPremium)).toFixed(2),
+        date: data.openingPaymentDate,
+        amount: d(data.openingPaidPremium).toFixed(2),
+        description: 'Фиксированные взносы, оплачено ранее',
+        kind: 'fixed_premium',
+        period: `${data.year}-fixed`,
+        documentNumber: '',
+        comment: 'Начальные данные',
+        source: 'opening',
+        sourceTransactionId: null,
+      })
+    }
+
+    const [ip, holidays] = await Promise.all([
+      ipRepo.getAll().then(items => items.find(item => item.id === ipId)),
+      settingsRepo.getHolidays(ipId, data.year),
+    ])
+    if (ip) switchToIp(ip, settings ?? null, holidays)
     setIsOnboarded(true)
     navigate('/dashboard')
   }
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <Card className="w-full max-w-lg">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <CardTitle>ИП Платежи</CardTitle>
-              {hasExistingIps && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs text-muted-foreground"
-                  onClick={() => navigate('/ips')}
-                >
-                  <ArrowLeft className="w-3.5 h-3.5 mr-1" />
-                  К списку ИП
-                </Button>
-              )}
-            </div>
-            <span className="text-sm text-muted-foreground">Шаг {step} из {totalSteps}</span>
+    <div className="onboarding-shell">
+      <div className="onboarding-brand"><div className="brand-mark"><span>ИП</span></div><div><strong>ИП Платежи</strong><small>Контроль доходов и налогов</small></div></div>
+      <Card className="w-full max-w-xl"><CardContent className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>{hasExistingIps && <Button variant="ghost" size="sm" onClick={() => navigate('/ips')}><ArrowLeft className="size-4" /> Все ИП</Button>}</div>
+          <span className="text-xs text-muted-foreground">Шаг {step} из 3</span>
+        </div>
+        <div className="onboarding-progress">{[1, 2, 3].map(item => <span key={item} className={item <= step ? 'active' : ''} />)}</div>
+
+        {step === 1 && <div className="space-y-5">
+          <div><p className="eyebrow">ПРОФИЛЬ</p><h1 className="text-2xl font-semibold tracking-tight mt-1">Добавим ИП</h1><p className="text-sm text-muted-foreground mt-1">Каждый профиль хранит операции и платежи отдельно.</p></div>
+          <div className="space-y-2"><Label>ФИО / название</Label><Input value={data.name} onChange={event => setData({ ...data, name: event.target.value })} placeholder="ИП Иванов Алексей Петрович" /></div>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div className="space-y-2"><Label>ИНН</Label><Input value={data.inn} maxLength={12} inputMode="numeric" onChange={event => setData({ ...data, inn: event.target.value.replace(/\D/g, '') })} placeholder="12 цифр" /></div>
+            <div className="space-y-2"><Label>Регион</Label><Input value={data.region} onChange={event => setData({ ...data, region: event.target.value })} /></div>
+            <div className="space-y-2"><Label>Дата регистрации</Label><Input type="date" value={data.registrationDate} onChange={event => setData({ ...data, registrationDate: event.target.value })} /></div>
+            <div className="space-y-2"><Label>Рабочий год</Label><Input value={data.year} disabled /><p className="text-xs text-muted-foreground">Проверенный набор правил 2026.1.</p></div>
+            <div className="space-y-2"><Label>Код ИФНС</Label><Input value={data.ifnsCode} maxLength={4} onChange={event => setData({ ...data, ifnsCode: event.target.value.replace(/\D/g, '') })} /></div>
+            <div className="space-y-2"><Label>ОКТМО</Label><Input value={data.oktmo} onChange={event => setData({ ...data, oktmo: event.target.value.replace(/\D/g, '') })} /></div>
           </div>
-          <div className="flex gap-1 mt-2">
-            {Array.from({ length: totalSteps }).map((_, i) => (
-              <div
-                key={i}
-                className={`h-1.5 flex-1 rounded-full transition-colors ${
-                  i < step ? 'bg-primary' : 'bg-muted'
-                }`}
-              />
-            ))}
+        </div>}
+
+        {step === 2 && <div className="space-y-5">
+          <div><p className="eyebrow">НАЛОГОВЫЙ РЕЖИМ</p><h1 className="text-2xl font-semibold tracking-tight mt-1">УСН «Доходы»</h1><p className="text-sm text-muted-foreground mt-1">Первый релиз специально упрощён под ИП без сотрудников.</p></div>
+          <div className="regime-card"><ShieldCheck className="size-6" /><div><strong>Ставка 6%</strong><p>Расходы ведутся для статистики и не уменьшают базу. Страховые взносы уменьшают рассчитанный налог по отдельному правилу.</p></div><Check className="size-5 text-emerald-600" /></div>
+          <div className="info-note">НДС не включён. Приложение только предупредит о приближении к порогу 20 млн ₽.</div>
+        </div>}
+
+        {step === 3 && <div className="space-y-5">
+          <div><p className="eyebrow">НАЧАЛЬНЫЕ ДАННЫЕ</p><h1 className="text-2xl font-semibold tracking-tight mt-1">Что было до приложения</h1><p className="text-sm text-muted-foreground mt-1">Начисления и оплаты вводятся отдельно — это важно для корректного расчёта.</p></div>
+          <div className="space-y-2"><Label>Ранее начислено авансов УСН, ₽</Label><Input type="number" min="0" value={data.openingAccruedUsn} onChange={event => setData({ ...data, openingAccruedUsn: event.target.value })} /><p className="text-xs text-muted-foreground">Эта сумма вычитается как ранее рассчитанные авансы.</p></div>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div className="space-y-2"><Label>Фактически уплачено УСН, ₽</Label><Input type="number" min="0" value={data.openingPaidUsn} onChange={event => setData({ ...data, openingPaidUsn: event.target.value })} /></div>
+            <div className="space-y-2"><Label>Уплачено фиксированных взносов, ₽</Label><Input type="number" min="0" value={data.openingPaidPremium} onChange={event => setData({ ...data, openingPaidPremium: event.target.value })} /></div>
           </div>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {step === 1 && (
-            <div className="space-y-4">
-              <h3 className="text-lg font-medium">Данные ИП</h3>
-              <div className="space-y-2">
-                <Label>ФИО / Название</Label>
-                <Input
-                  value={data.name}
-                  onChange={(e) => setData({ ...data, name: e.target.value })}
-                  placeholder="ИП Иванов Алексей Петрович"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>ИНН</Label>
-                <Input
-                  value={data.inn}
-                  onChange={(e) => setData({ ...data, inn: e.target.value })}
-                  placeholder="770123456789"
-                  maxLength={12}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Регион</Label>
-                <Input
-                  value={data.region}
-                  onChange={(e) => setData({ ...data, region: e.target.value })}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label>Код ИФНС</Label>
-                  <Input
-                    value={data.ifnsCode}
-                    onChange={(e) => setData({ ...data, ifnsCode: e.target.value })}
-                    placeholder="7701"
-                    maxLength={4}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>ОКТМО</Label>
-                  <Input
-                    value={data.oktmo}
-                    onChange={(e) => setData({ ...data, oktmo: e.target.value })}
-                    placeholder="45348000"
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Год расчёта</Label>
-                <Input
-                  type="number"
-                  value={data.year}
-                  onChange={(e) => setData({ ...data, year: parseInt(e.target.value) })}
-                  min={2020}
-                  max={2030}
-                />
-              </div>
-            </div>
-          )}
+          <div className="space-y-2"><Label>Дата прошлых платежей</Label><Input type="date" value={data.openingPaymentDate} onChange={event => setData({ ...data, openingPaymentDate: event.target.value })} /></div>
+        </div>}
 
-          {step === 2 && (
-            <div className="space-y-4">
-              <h3 className="text-lg font-medium">Режим УСН</h3>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={() => setData({ ...data, usnObject: 'income' })}
-                  className={`p-4 rounded-lg border-2 text-left transition-colors ${
-                    data.usnObject === 'income'
-                      ? 'border-primary bg-primary/5'
-                      : 'border-border hover:border-primary/50'
-                  }`}
-                >
-                  <div className="font-medium">Доходы</div>
-                  <div className="text-sm text-muted-foreground">Ставка 6%</div>
-                </button>
-                <button
-                  onClick={() => setData({ ...data, usnObject: 'income_minus_expenses' })}
-                  className={`p-4 rounded-lg border-2 text-left transition-colors ${
-                    data.usnObject === 'income_minus_expenses'
-                      ? 'border-primary bg-primary/5'
-                      : 'border-border hover:border-primary/50'
-                  }`}
-                >
-                  <div className="font-medium">Доходы минус расходы</div>
-                  <div className="text-sm text-muted-foreground">Ставка 15%</div>
-                </button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Для ИП без сотрудников на УСН «Доходы» налог можно уменьшить на фиксированные взносы до 100%.
-              </p>
-            </div>
-          )}
-
-          {step === 3 && (
-            <div className="space-y-4">
-              <h3 className="text-lg font-medium">НДС</h3>
-              <p className="text-sm text-muted-foreground">
-                НДС при УСН возникает только при превышении порога 60 млн ₽ (с 2025 г.).
-                Если ваши доходы ниже — оставьте «Выключен».
-              </p>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={() => setData({ ...data, ndsEnabled: true })}
-                  className={`p-4 rounded-lg border-2 text-left transition-colors ${
-                    data.ndsEnabled
-                      ? 'border-primary bg-primary/5'
-                      : 'border-border hover:border-primary/50'
-                  }`}
-                >
-                  <div className="font-medium">Включён</div>
-                  <div className="text-sm text-muted-foreground">Платить НДС</div>
-                </button>
-                <button
-                  onClick={() => setData({ ...data, ndsEnabled: false })}
-                  className={`p-4 rounded-lg border-2 text-left transition-colors ${
-                    !data.ndsEnabled
-                      ? 'border-primary bg-primary/5'
-                      : 'border-border hover:border-primary/50'
-                  }`}
-                >
-                  <div className="font-medium">Выключен</div>
-                  <div className="text-sm text-muted-foreground">Без НДС</div>
-                </button>
-              </div>
-            </div>
-          )}
-
-          {step === 4 && (
-            <div className="space-y-4">
-              <h3 className="text-lg font-medium">Стартовые остатки</h3>
-              <p className="text-sm text-muted-foreground">
-                Укажите уже уплаченные суммы за текущий год (если есть). Эти данные будут учтены при расчёте налогов.
-              </p>
-              <div className="space-y-3">
-                <div className="space-y-2">
-                  <Label>Уплачено авансов УСН (₽)</Label>
-                  <Input
-                    type="number"
-                    value={data.startUsnPaid}
-                    onChange={(e) => setData({ ...data, startUsnPaid: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Уплачено фиксированных взносов (₽)</Label>
-                  <Input
-                    type="number"
-                    value={data.startPremiumPaid}
-                    onChange={(e) => setData({ ...data, startPremiumPaid: e.target.value })}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="flex justify-between pt-4">
-            <Button
-              variant="outline"
-              onClick={() => setStep(Math.max(1, step - 1))}
-              disabled={step === 1}
-            >
-              <ChevronLeft className="w-4 h-4 mr-1" /> Назад
-            </Button>
-            {step < totalSteps ? (
-              <Button
-                onClick={() => setStep(step + 1)}
-                disabled={step === 1 && (!data.name || !data.inn)}
-              >
-                Далее <ChevronRight className="w-4 h-4 ml-1" />
-              </Button>
-            ) : (
-              <Button onClick={handleFinish}>
-                <Check className="w-4 h-4 mr-1" /> Начать
-              </Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+        {error && <div className="form-error">{error}</div>}
+        <div className="flex justify-between pt-2">
+          <Button variant="outline" disabled={step === 1} onClick={() => setStep(current => Math.max(1, current - 1))}><ChevronLeft className="size-4" /> Назад</Button>
+          {step < 3
+            ? <Button disabled={step === 1 && (!data.name || data.inn.length !== 12)} onClick={() => setStep(current => current + 1)}>Далее <ChevronRight className="size-4" /></Button>
+            : <Button onClick={finish}><Check className="size-4" /> Создать ИП</Button>}
+        </div>
+      </CardContent></Card>
     </div>
   )
 }

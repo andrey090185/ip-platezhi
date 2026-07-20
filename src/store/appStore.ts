@@ -26,6 +26,7 @@ interface AppState {
   getLastActiveIpId: () => number | null
   setUserId: (id: string | null) => void
   setSyncStatus: (status: 'synced' | 'syncing' | 'offline' | 'error') => void
+  resetWorkspace: () => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -76,4 +77,12 @@ export const useAppStore = create<AppState>((set) => ({
   },
   setUserId: (id) => set({ userId: id }),
   setSyncStatus: (status) => set({ syncStatus: status }),
+  resetWorkspace: () => set({
+    currentIp: null,
+    taxSettings: null,
+    holidays: [],
+    isOnboarded: false,
+    ipList: [],
+    sidebarOpen: false,
+  }),
 }))

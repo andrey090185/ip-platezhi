@@ -126,27 +126,7 @@ export interface ImportResult {
   errors: { row: number; message: string }[]
 }
 
-function mapRow(raw: Record<string, string>): ImportRow {
-  const mapped: Record<string, string> = {}
-  for (const [key, value] of Object.entries(raw)) {
-    const canonical = FIELD_MAP[key.toLowerCase().trim()]
-    if (canonical && !mapped[canonical]) {
-      mapped[canonical] = value
-    }
-  }
-  return {
-    date: mapped.date ?? '',
-    type: mapped.type ?? '',
-    amount: mapped.amount ?? '',
-    category: mapped.category ?? '',
-    counterparty: mapped.counterparty ?? '',
-    comment: mapped.comment ?? '',
-    usnRelevant: mapped.usnRelevant ?? 'true',
-    ndsRelevant: mapped.ndsRelevant ?? 'false',
-  }
-}
-
-function detectType(raw: string): TransactionType {
+function detectType(raw: string): TransactionType | null {
   const v = raw.toLowerCase().trim()
   if (v === 'доход' || v === 'income' || v === 'приход') return 'income'
   if (v === 'расход' || v === 'expense' || v === 'списание') return 'expense'
@@ -156,7 +136,26 @@ function detectType(raw: string): TransactionType {
   if (v.includes('расход')) return 'expense'
   if (v.includes('income')) return 'income'
   if (v.includes('expense')) return 'expense'
-  return 'income'
+  if (v.includes('дебет') || v.includes('debit')) return 'expense'
+  if (v.includes('кредит') || v.includes('credit')) return 'income'
+  return null
+}
+
+export function transactionFingerprint(input: Pick<Transaction, 'ipId' | 'date' | 'type' | 'amount' | 'counterparty' | 'comment'>): string {
+  const source = [
+    input.ipId,
+    input.date,
+    input.type,
+    Number(input.amount).toFixed(2),
+    input.counterparty.trim().toLowerCase(),
+    input.comment.trim().toLowerCase(),
+  ].join('|')
+  let hash = 2166136261
+  for (let index = 0; index < source.length; index++) {
+    hash ^= source.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return `tx_${(hash >>> 0).toString(16).padStart(8, '0')}`
 }
 
 function parseBool(v: string, fallback: boolean): boolean {
@@ -197,7 +196,7 @@ function autoDetectColumns(rows: Record<string, string>[]): Record<string, keyof
       }
 
       // Amount: clean positive number (not a date)
-      const cleaned = val.replace(/[^\d.,\-]/g, '').replace(/,/g, '.')
+      const cleaned = val.replace(/[^\d.,-]/g, '').replace(/,/g, '.')
       const num = Number(cleaned)
       if (!isNaN(num) && num > 0 && num < 1_000_000_000) {
         if (!/^\d{1,2}[.\-/]\d{1,2}[.\-/]\d{1,4}$/.test(val)) {
@@ -312,6 +311,20 @@ function processRows(
       }
     }
 
+    // Bank statements often provide separate debit/credit amount columns.
+    // Use the non-empty one and infer direction instead of dropping the row.
+    const debitEntry = Object.entries(raw).find(([key]) => /дебет|debit/i.test(key))
+    const creditEntry = Object.entries(raw).find(([key]) => /кредит|credit/i.test(key))
+    const debitValue = debitEntry?.[1]?.trim()
+    const creditValue = creditEntry?.[1]?.trim()
+    if (debitValue && !creditValue) {
+      mapped.amount = debitValue
+      mapped.type = 'debit'
+    } else if (creditValue && !debitValue) {
+      mapped.amount = creditValue
+      mapped.type = 'credit'
+    }
+
     const importRow: ImportRow = {
       date: mapped.date ?? '',
       type: mapped.type ?? '',
@@ -325,8 +338,8 @@ function processRows(
 
     let date = importRow.date
     if (!date) {
-      errors.push({ row: i + 2, message: 'Отсутствует дата, используется текущая' })
-      date = now.split('T')[0]
+      errors.push({ row: i + 2, message: 'Отсутствует дата — строка пропущена' })
+      continue
     } else if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       const parts = date.split(/[.\-/]/)
       if (parts.length === 3) {
@@ -337,10 +350,14 @@ function processRows(
         date = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
       }
     }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(new Date(`${date}T00:00:00`).getTime())) {
+      errors.push({ row: i + 2, message: `Некорректная дата: "${importRow.date}"` })
+      continue
+    }
 
     const rawAmount = importRow.amount
     let amount = rawAmount
-      .replace(/[^\d.,\-]/g, '')  // remove all but digits, dots, commas, dashes
+      .replace(/[^\d.,-]/g, '')  // remove all but digits, dots, commas, dashes
       .replace(/,/g, '.')         // convert all commas to dots
 
     // If there are multiple dots, keep only the last one (decimal separator)
@@ -350,16 +367,19 @@ function processRows(
       amount = amount.slice(0, lastDot).replace(/\./g, '') + amount.slice(lastDot)
     }
 
-    if (!amount || isNaN(Number(amount)) || Number(amount) < 0) {
+    if (!amount || isNaN(Number(amount)) || Number(amount) === 0) {
       errors.push({ row: i + 2, message: `Некорректная сумма: "${rawAmount}"` })
       continue
     }
-    amount = Number(amount).toFixed(2)
+    const signedAmount = Number(amount)
+    amount = Math.abs(signedAmount).toFixed(2)
 
-    const type = detectType(importRow.type)
+    const detectedType = detectType(importRow.type)
+    const type = detectedType ?? (signedAmount < 0 ? 'expense' : 'income')
+    const needsReview = detectedType === null
     const period = date.substring(0, 7)
 
-    transactions.push({
+    const transaction: Omit<Transaction, 'id'> = {
       ipId,
       date,
       type,
@@ -367,15 +387,17 @@ function processRows(
       category: importRow.category,
       counterparty: importRow.counterparty,
       comment: importRow.comment,
-      usnRelevant: parseBool(importRow.usnRelevant, true),
+      usnRelevant: needsReview ? false : parseBool(importRow.usnRelevant, type === 'income'),
       ndsRelevant: parseBool(importRow.ndsRelevant, false),
       period,
       importSource: 'file',
       importBatchId: batchId,
-      status: 'accounted',
+      status: needsReview ? 'needs_review' : 'accounted',
       createdAt: now,
       updatedAt: now,
-    })
+    }
+    transaction.fingerprint = transactionFingerprint(transaction)
+    transactions.push(transaction)
   }
 
   return { transactions, errors }

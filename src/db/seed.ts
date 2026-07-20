@@ -61,7 +61,6 @@ export async function seedHolidays(ipId: number, year: number) {
   const existing = await db.holidays.where({ ipId, year }).first()
   if (existing) return
 
-  const now = new Date().toISOString()
   for (const h of RUSSIAN_HOLIDAYS_2026) {
     await db.holidays.add({
       ipId,

@@ -17,5 +17,8 @@ export const auth = getAuth(app)
 export const db = getDatabase(app)
 
 export function isFirebaseConfigured(): boolean {
-  return firebaseConfig.apiKey !== 'YOUR_API_KEY'
+  // Allows a fully local build for development, demos and emergency offline
+  // access without weakening authentication in the deployed application.
+  const localMode = import.meta.env.VITE_LOCAL_MODE === 'true'
+  return !localMode && firebaseConfig.apiKey !== 'YOUR_API_KEY'
 }
