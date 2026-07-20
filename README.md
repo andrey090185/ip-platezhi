@@ -76,6 +76,8 @@ npx firebase-tools deploy --only database
 
 ## Cloudflare Workers Builds
 
+Текущий production-адрес: <https://ip-platezhi.andrey09011985.workers.dev/>.
+
 Рекомендуемые настройки Git-интеграции:
 
 - production branch: `main`;
