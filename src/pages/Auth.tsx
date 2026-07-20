@@ -58,7 +58,7 @@ export default function Auth() {
   return (
     <div className="auth-shell">
       <div className="auth-intro">
-        <div className="onboarding-brand"><div className="brand-mark"><span>ИП</span></div><div><strong>ИП Платежи</strong><small>Control center</small></div></div>
+        <div className="onboarding-brand"><div className="brand-mark"><span>ИП</span></div><div><strong>ИП Платежи</strong><small>Центр управления</small></div></div>
         <p className="eyebrow">ФИНАНСЫ БЕЗ ШУМА</p>
         <h1>Все ваши ИП.<br />Один понятный контур.</h1>
         <p>Доходы, обязательства, сроки и фактические платежи — раздельно по каждому профилю.</p>
@@ -74,7 +74,7 @@ export default function Auth() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="auth-email">Email</Label>
+              <Label htmlFor="auth-email">Электронная почта</Label>
               <Input
                 id="auth-email"
                 type="email"

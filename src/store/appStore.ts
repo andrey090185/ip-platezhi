@@ -12,6 +12,7 @@ interface AppState {
   sidebarOpen: boolean
   theme: 'light' | 'dark'
   userId: string | null
+  userEmail: string | null
   syncStatus: 'synced' | 'syncing' | 'offline' | 'error'
 
   setCurrentIp: (ip: IpProfile | null) => void
@@ -25,6 +26,7 @@ interface AppState {
   toggleTheme: () => void
   getLastActiveIpId: () => number | null
   setUserId: (id: string | null) => void
+  setUserEmail: (email: string | null) => void
   setSyncStatus: (status: 'synced' | 'syncing' | 'offline' | 'error') => void
   resetWorkspace: () => void
 }
@@ -38,6 +40,7 @@ export const useAppStore = create<AppState>((set) => ({
   sidebarOpen: false,
   theme: (typeof window !== 'undefined' && localStorage.getItem('theme') as 'light' | 'dark') || 'light',
   userId: null,
+  userEmail: null,
   syncStatus: 'offline',
 
   setCurrentIp: (ip) => {
@@ -76,6 +79,7 @@ export const useAppStore = create<AppState>((set) => ({
     return val ? parseInt(val) : null
   },
   setUserId: (id) => set({ userId: id }),
+  setUserEmail: (email) => set({ userEmail: email }),
   setSyncStatus: (status) => set({ syncStatus: status }),
   resetWorkspace: () => set({
     currentIp: null,

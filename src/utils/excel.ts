@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx'
+import { findImportHeaderRow } from './importHeaders'
 
 /**
  * Strip all Unicode whitespace characters (including non-breaking spaces)
@@ -38,7 +39,7 @@ function formatCellValue(val: unknown): string {
 
 /**
  * Parse an Excel file (.xlsx, .xls) and return an array of row objects.
- * Reads the first sheet, treats the first row as headers.
+ * Reads the first sheet and finds the actual header after optional bank metadata.
  */
 export function parseExcel(file: File): Promise<Record<string, string>[]> {
   return new Promise((resolve, reject) => {
@@ -62,34 +63,7 @@ export function parseExcel(file: File): Promise<Record<string, string>[]> {
           blankrows: false,
         })
 
-        if (raw.length < 2) {
-          resolve([])
-          return
-        }
-
-        // Clean the header row: remove non-breaking spaces, trim
-        const headers = raw[0].map((h) =>
-          cleanWhitespace(String(h ?? ''))
-        ).filter(Boolean) // drop completely empty headers
-
-        if (headers.length === 0) {
-          resolve([])
-          return
-        }
-
-        const rows: Record<string, string>[] = []
-        for (let i = 1; i < raw.length; i++) {
-          const row: Record<string, string> = {}
-          for (let j = 0; j < headers.length; j++) {
-            const val = raw[i]?.[j]
-            row[headers[j]] = formatCellValue(val)
-          }
-          // Skip completely empty rows
-          if (Object.values(row).every(v => !v)) continue
-          rows.push(row)
-        }
-
-        resolve(rows)
+        resolve(excelRowsToRecords(raw))
       } catch (err) {
         reject(err instanceof Error ? err : new Error('Ошибка парсинга Excel'))
       }
@@ -97,6 +71,38 @@ export function parseExcel(file: File): Promise<Record<string, string>[]> {
     reader.onerror = () => reject(new Error('Не удалось прочитать файл'))
     reader.readAsArrayBuffer(file)
   })
+}
+
+/** Pure conversion helper used by the parser and regression tests. */
+export function excelRowsToRecords(raw: unknown[][]): Record<string, string>[] {
+  if (raw.length < 2) return []
+
+  const headerIndex = findImportHeaderRow(raw)
+  if (headerIndex < 0 || headerIndex >= raw.length - 1) return []
+
+  // Keep the original indexes: an empty cell in the header must not shift data.
+  const headerColumns = (raw[headerIndex] ?? [])
+    .map((header, index) => ({ header: cleanWhitespace(String(header ?? '')), index }))
+    .filter(({ header }) => Boolean(header))
+  if (headerColumns.length === 0) return []
+
+  const seenHeaders = new Map<string, number>()
+  const columns = headerColumns.map(({ header, index }) => {
+    const occurrence = (seenHeaders.get(header) ?? 0) + 1
+    seenHeaders.set(header, occurrence)
+    return { header: occurrence === 1 ? header : `${header} ${occurrence}`, index }
+  })
+
+  const rows: Record<string, string>[] = []
+  for (let rowIndex = headerIndex + 1; rowIndex < raw.length; rowIndex++) {
+    const row: Record<string, string> = {}
+    for (const { header, index } of columns) {
+      row[header] = formatCellValue(raw[rowIndex]?.[index])
+    }
+    if (Object.values(row).every((value) => !value)) continue
+    rows.push(row)
+  }
+  return rows
 }
 
 /**

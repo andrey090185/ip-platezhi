@@ -1,4 +1,5 @@
 import type { Transaction, TransactionType } from '@/types'
+import { normalizeImportHeader } from './importHeaders'
 
 /** Keys a user might use in CSV/Excel headers. */
 const FIELD_MAP: Record<string, keyof ImportRow> = {
@@ -110,6 +111,22 @@ const FIELD_MAP: Record<string, keyof ImportRow> = {
   'vat': 'ndsRelevant',
 }
 
+const NORMALIZED_FIELD_MAP = Object.entries(FIELD_MAP)
+  .map(([header, field]) => [normalizeImportHeader(header), field] as const)
+  .sort(([left], [right]) => right.length - left.length)
+
+function resolveImportField(header: string): keyof ImportRow | undefined {
+  const normalized = normalizeImportHeader(header)
+  const exact = NORMALIZED_FIELD_MAP.find(([alias]) => alias === normalized)
+  if (exact) return exact[1]
+
+  // Bank exports frequently append clarifications such as "по счёту" or
+  // "в валюте операции" to otherwise standard column names.
+  return NORMALIZED_FIELD_MAP.find(([alias]) =>
+    alias.length >= 4 && (` ${normalized} `).includes(` ${alias} `)
+  )?.[1]
+}
+
 export interface ImportRow {
   date: string
   type: string
@@ -165,6 +182,62 @@ function parseBool(v: string, fallback: boolean): boolean {
   return fallback
 }
 
+function isValidDateParts(year: number, month: number, day: number): boolean {
+  const candidate = new Date(Date.UTC(year, month - 1, day))
+  return candidate.getUTCFullYear() === year &&
+    candidate.getUTCMonth() === month - 1 &&
+    candidate.getUTCDate() === day
+}
+
+export function parseImportDate(raw: string): string | null {
+  const value = raw.trim()
+  if (!value) return null
+
+  let year: number
+  let month: number
+  let day: number
+  let match = value.match(/^(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})(?:[ T].*)?$/)
+  if (match) {
+    year = Number(match[1])
+    month = Number(match[2])
+    day = Number(match[3])
+  } else {
+    match = value.match(/^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2}|\d{4})(?:[ T].*)?$/)
+    if (match) {
+      day = Number(match[1])
+      month = Number(match[2])
+      year = Number(match[3])
+      if (year < 100) year += 2000
+    } else if (/^\d+(?:[.,]\d+)?$/.test(value)) {
+      const serial = Number(value.replace(',', '.'))
+      if (serial < 20_000 || serial > 80_000) return null
+      const excelDate = new Date(Date.UTC(1899, 11, 30) + Math.floor(serial) * 86_400_000)
+      year = excelDate.getUTCFullYear()
+      month = excelDate.getUTCMonth() + 1
+      day = excelDate.getUTCDate()
+    } else {
+      return null
+    }
+  }
+
+  if (!isValidDateParts(year, month, day)) return null
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
+function parseImportAmount(raw: string): number | null {
+  let value = raw
+    .replace(/[\s\u00A0\u202F]/g, '')
+    .replace(/[^\d.,-]/g, '')
+    .replace(/,/g, '.')
+  const dotCount = (value.match(/\./g) || []).length
+  if (dotCount > 1) {
+    const lastDot = value.lastIndexOf('.')
+    value = value.slice(0, lastDot).replace(/\./g, '') + value.slice(lastDot)
+  }
+  const amount = Number(value)
+  return value && Number.isFinite(amount) && amount !== 0 ? amount : null
+}
+
 /**
  * Try to auto-detect which column contains what data by scanning ALL rows.
  * Returns a map of lowercased header -> field name only for fields it can detect.
@@ -189,9 +262,7 @@ function autoDetectColumns(rows: Record<string, string>[]): Record<string, keyof
       const t = totals[key]
       t.filled++
 
-      // Date: DD.MM.YYYY or DD/MM/YYYY or DD-MM-YYYY or YYYY-MM-DD
-      if (/^\d{2}[.\-/]\d{2}[.\-/]\d{2,4}$/.test(val) ||
-          /^\d{4}[.\-/]\d{2}[.\-/]\d{2}$/.test(val)) {
+      if (parseImportDate(val)) {
         t.date++
       }
 
@@ -248,15 +319,15 @@ function autoDetectColumns(rows: Record<string, string>[]): Record<string, keyof
 
   const result: Record<string, keyof ImportRow> = {}
   const dk = bestKey('date')
-  if (dk) result[dk.toLowerCase().trim()] = 'date'
+  if (dk) result[normalizeImportHeader(dk)] = 'date'
   const ak = bestKey('amount')
-  if (ak) result[ak.toLowerCase().trim()] = 'amount'
+  if (ak) result[normalizeImportHeader(ak)] = 'amount'
   const tk = bestKey('type')
-  if (tk) result[tk.toLowerCase().trim()] = 'type'
+  if (tk) result[normalizeImportHeader(tk)] = 'type'
 
   // Special case: if no single amount column found, look for debit/credit pair
   if (!ak) {
-    const headerKeys = keys.map(k => k.toLowerCase().trim())
+    const headerKeys = keys.map(normalizeImportHeader)
     const debitKey = headerKeys.find(k => k.includes('дебет') || k.includes('debit'))
     const creditKey = headerKeys.find(k => k.includes('кредит') || k.includes('credit'))
     // If both debit and credit columns exist, use the one with more numeric values
@@ -294,9 +365,9 @@ function processRows(
   const errors: { row: number; message: string }[] = []
 
   // Merge FIELD_MAP with extra mapping (extra overrides on conflict)
-  const combinedMap: Record<string, keyof ImportRow> = { ...FIELD_MAP }
+  const combinedMap: Record<string, keyof ImportRow> = {}
   for (const [key, field] of Object.entries(extraMapping)) {
-    combinedMap[key] = field
+    combinedMap[normalizeImportHeader(key)] = field
   }
 
   for (let i = 0; i < rawRows.length; i++) {
@@ -305,7 +376,8 @@ function processRows(
     // Map using both FIELD_MAP and auto-detected columns
     const mapped: Record<string, string> = {}
     for (const [key, value] of Object.entries(raw)) {
-      const canonical = combinedMap[key.toLowerCase().trim()]
+      const normalizedKey = normalizeImportHeader(key)
+      const canonical = combinedMap[normalizedKey] ?? resolveImportField(key)
       if (canonical && !mapped[canonical]) {
         mapped[canonical] = value
       }
@@ -313,8 +385,12 @@ function processRows(
 
     // Bank statements often provide separate debit/credit amount columns.
     // Use the non-empty one and infer direction instead of dropping the row.
-    const debitEntry = Object.entries(raw).find(([key]) => /дебет|debit/i.test(key))
-    const creditEntry = Object.entries(raw).find(([key]) => /кредит|credit/i.test(key))
+    const debitEntry = Object.entries(raw).find(([key, value]) =>
+      /дебет|debit|списан/i.test(key) && parseImportAmount(value) !== null
+    )
+    const creditEntry = Object.entries(raw).find(([key, value]) =>
+      /кредит|credit|зачислен|поступлен/i.test(key) && parseImportAmount(value) !== null
+    )
     const debitValue = debitEntry?.[1]?.trim()
     const creditValue = creditEntry?.[1]?.trim()
     if (debitValue && !creditValue) {
@@ -336,43 +412,23 @@ function processRows(
       ndsRelevant: mapped.ndsRelevant ?? 'false',
     }
 
-    let date = importRow.date
-    if (!date) {
+    if (!importRow.date) {
       errors.push({ row: i + 2, message: 'Отсутствует дата — строка пропущена' })
       continue
-    } else if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      const parts = date.split(/[.\-/]/)
-      if (parts.length === 3) {
-        const [d1, d2, d3] = parts
-        const y = d3.length === 4 ? d3 : d1.length === 4 ? d1 : String(new Date().getFullYear())
-        const m = d3.length === 4 ? d2 : d1.length === 4 ? d2 : d1
-        const d = d3.length === 4 ? d1 : d1.length === 4 ? d3 : d1
-        date = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
-      }
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(new Date(`${date}T00:00:00`).getTime())) {
+    const date = parseImportDate(importRow.date)
+    if (!date) {
       errors.push({ row: i + 2, message: `Некорректная дата: "${importRow.date}"` })
       continue
     }
 
     const rawAmount = importRow.amount
-    let amount = rawAmount
-      .replace(/[^\d.,-]/g, '')  // remove all but digits, dots, commas, dashes
-      .replace(/,/g, '.')         // convert all commas to dots
-
-    // If there are multiple dots, keep only the last one (decimal separator)
-    const dotCount = (amount.match(/\./g) || []).length
-    if (dotCount > 1) {
-      const lastDot = amount.lastIndexOf('.')
-      amount = amount.slice(0, lastDot).replace(/\./g, '') + amount.slice(lastDot)
-    }
-
-    if (!amount || isNaN(Number(amount)) || Number(amount) === 0) {
+    const signedAmount = parseImportAmount(rawAmount)
+    if (signedAmount === null) {
       errors.push({ row: i + 2, message: `Некорректная сумма: "${rawAmount}"` })
       continue
     }
-    const signedAmount = Number(amount)
-    amount = Math.abs(signedAmount).toFixed(2)
+    const amount = Math.abs(signedAmount).toFixed(2)
 
     const detectedType = detectType(importRow.type)
     const type = detectedType ?? (signedAmount < 0 ? 'expense' : 'income')

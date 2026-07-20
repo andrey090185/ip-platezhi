@@ -24,7 +24,7 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [route, setRoute] = useState<'loading' | 'auth' | 'onboarding' | 'selector' | 'app'>('loading')
   const {
-    setUserId, setSyncStatus,
+    setUserId, setUserEmail, setSyncStatus,
     resetWorkspace, theme, isOnboarded
   } = useAppStore()
 
@@ -65,6 +65,7 @@ function App() {
       resetWorkspace()
       if (user) {
         setUserId(user.uid)
+        setUserEmail(user.email)
         setSyncUser(user.uid)
         setLoading(true)
         setSyncStatus('syncing')
@@ -79,6 +80,7 @@ function App() {
       } else {
         // Login is required — show the auth screen when no user is signed in.
         setUserId(null)
+        setUserEmail(null)
         setSyncUser(null)
         setSyncStatus('offline')
         setRoute('auth')
@@ -87,7 +89,7 @@ function App() {
     })
 
     return () => unsubscribe()
-  }, [initAppLocal, resetWorkspace, setSyncStatus, setUserId])
+  }, [initAppLocal, resetWorkspace, setSyncStatus, setUserEmail, setUserId])
 
   if (loading || route === 'loading') {
     return (

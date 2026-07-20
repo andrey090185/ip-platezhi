@@ -48,6 +48,14 @@ const obligationLabels: Record<TaxObligation['type'], string> = {
   notification: 'Уведомление',
 }
 
+const operationFilterLabels: Record<string, string> = {
+  all: 'Все назначения',
+  income: 'Доходы и возвраты',
+  expense: 'Расходы ИП',
+  tax: 'Налоги и взносы',
+  review: 'Требует проверки',
+}
+
 function line(kind: AllocationKind, amount = ''): AllocationLine {
   return {
     key: `${Date.now()}-${Math.random()}`,
@@ -327,7 +335,7 @@ export default function IncomeExpenses() {
                             taxPaymentKind: value === 'tax_payment' ? (item.taxPaymentKind ?? 'usn') : null,
                             obligationId: value === 'tax_payment' ? item.obligationId : null,
                           })}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectTrigger className="w-full min-w-0"><SelectValue>{ALLOCATION_LABELS[item.kind]}</SelectValue></SelectTrigger>
                             <SelectContent>
                               {(form.direction === 'in' ? incomingKinds : outgoingKinds).map(kind => <SelectItem key={kind} value={kind}>{ALLOCATION_LABELS[kind]}</SelectItem>)}
                             </SelectContent>
@@ -348,7 +356,12 @@ export default function IncomeExpenses() {
                                   : obligation?.type === 'ip_premium_additional' ? 'additional_premium' : 'usn',
                               })
                             }}>
-                              <SelectTrigger><SelectValue /></SelectTrigger>
+                              <SelectTrigger className="w-full min-w-0"><SelectValue>{item.obligationId
+                                ? (() => {
+                                    const obligation = obligations.find(entry => entry.id === item.obligationId)
+                                    return obligation ? `${obligationLabels[obligation.type]} · ${obligation.period}` : 'Обязательство не найдено'
+                                  })()
+                                : 'ЕНП без распределения'}</SelectValue></SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="none">ЕНП без распределения</SelectItem>
                                 {obligations.filter(entry => d(entry.amount).gt(d(entry.paidAmount))).map(entry => (
@@ -385,14 +398,16 @@ export default function IncomeExpenses() {
 
       <div className="toolbar-card">
         <Select value={filterMonth} onValueChange={setFilterMonth}>
-          <SelectTrigger className="w-full sm:w-44"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-full sm:w-44"><SelectValue>{filterMonth === 'all'
+            ? `Весь ${currentIp.year} год`
+            : new Date(`${filterMonth}-01T00:00:00`).toLocaleDateString('ru-RU', { month: 'long' })}</SelectValue></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Весь {currentIp.year} год</SelectItem>
             {Array.from({ length: 12 }, (_, index) => <SelectItem key={index} value={`${currentIp.year}-${String(index + 1).padStart(2, '0')}`}>{new Date(currentIp.year, index).toLocaleDateString('ru-RU', { month: 'long' })}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={filterType} onValueChange={setFilterType}>
-          <SelectTrigger className="w-full sm:w-52"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-full sm:w-52"><SelectValue>{operationFilterLabels[filterType]}</SelectValue></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Все назначения</SelectItem>
             <SelectItem value="income">Доходы и возвраты</SelectItem>

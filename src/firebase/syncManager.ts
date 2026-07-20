@@ -145,9 +145,12 @@ export async function syncAdd(userId: string | undefined, dexieTable: any, id: n
   const uid = resolveUser(userId)
   const table = getTable(dexieTable)
   if (uid && table) {
+    onStatus?.('syncing')
     try {
       await syncRecordToCloud(uid, table, id, data)
+      onStatus?.('synced')
     } catch (e) {
+      onStatus?.('error')
       console.warn('Sync add failed:', e)
     }
   }
@@ -157,9 +160,12 @@ export async function syncUpdate(userId: string | undefined, dexieTable: any, id
   const uid = resolveUser(userId)
   const table = getTable(dexieTable)
   if (uid && table) {
+    onStatus?.('syncing')
     try {
       await syncRecordToCloud(uid, table, id, data)
+      onStatus?.('synced')
     } catch (e) {
+      onStatus?.('error')
       console.warn('Sync update failed:', e)
     }
   }
@@ -221,6 +227,20 @@ export async function pushAllToCloud(userId: string): Promise<void> {
   if (!userId) return
   for (const [dexieTable, name] of CANON) {
     await syncFullTable(userId, dexieTable, name)
+  }
+}
+
+export async function retrySync(): Promise<void> {
+  const userId = sessionUserId
+  if (!userId) return
+  onStatus?.('syncing')
+  try {
+    await flushPendingDeletes(userId)
+    await pushAllToCloud(userId)
+    onStatus?.('synced')
+  } catch (error) {
+    onStatus?.('error')
+    throw error
   }
 }
 

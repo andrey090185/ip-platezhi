@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { parseCSV } from '@/utils/csv'
+import { parseCSVBuffer } from '@/utils/csv'
 import { parseExcel, isExcelFile } from '@/utils/excel'
 import { rowsToTransactions } from '@/utils/importService'
 import { transactionRepo } from '@/db/repositories/transactionRepo'
@@ -28,6 +28,13 @@ interface PreviewRow {
   errors: string[]
 }
 
+const transactionTypeLabels: Record<Transaction['type'], string> = {
+  income: 'Доход',
+  expense: 'Расход',
+  return_income: 'Возврат дохода',
+  return_expense: 'Возврат расхода',
+}
+
 export function ImportDialog({ open, onOpenChange, ipId, onImported }: ImportDialogProps) {
   const [step, setStep] = useState<ImportStep>('select')
   const [fileName, setFileName] = useState<string | null>(null)
@@ -46,8 +53,7 @@ export function ImportDialog({ open, onOpenChange, ipId, onImported }: ImportDia
       if (isExcelFile(file)) {
         rows = await parseExcel(file)
       } else {
-        const text = await file.text()
-        rows = parseCSV(text)
+        rows = parseCSVBuffer(await file.arrayBuffer())
       }
 
       if (rows.length === 0) {
@@ -63,7 +69,7 @@ export function ImportDialog({ open, onOpenChange, ipId, onImported }: ImportDia
       // Build preview
       const preview: PreviewRow[] = transactions.slice(0, 10).map(tx => ({
         date: tx.date,
-        type: tx.type === 'income' ? 'Доход' : tx.type === 'expense' ? 'Расход' : tx.type,
+        type: transactionTypeLabels[tx.type],
         amount: Number(tx.amount).toLocaleString('ru-RU', { minimumFractionDigits: 2 }),
         category: tx.category,
         counterparty: tx.counterparty,
@@ -256,9 +262,12 @@ export function ImportDialog({ open, onOpenChange, ipId, onImported }: ImportDia
                   Предупреждения ({importErrors.length})
                 </summary>
                 <div className="mt-2 space-y-1 max-h-32 overflow-auto">
-                  {importErrors.map((err, i) => (
+                  {importErrors.slice(0, 50).map((err, i) => (
                     <div key={i}>Строка {err.row}: {err.message}</div>
                   ))}
+                  {importErrors.length > 50 && (
+                    <div>И ещё {importErrors.length - 50} предупреждений</div>
+                  )}
                 </div>
               </details>
             )}

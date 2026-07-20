@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { rowsToTransactions, transactionFingerprint } from '../importService'
+import { rowsToTransactions, transactionFingerprint, parseImportDate } from '../importService'
+import { parseCSV } from '../csv'
+import { excelRowsToRecords } from '../excel'
 
 describe('safe statement import', () => {
   it('does not replace a missing date with today', () => {
@@ -34,5 +36,41 @@ describe('safe statement import', () => {
     }
     expect(transactionFingerprint(input)).toBe(transactionFingerprint({ ...input }))
   })
-})
 
+  it('finds a CSV header after bank metadata rows', () => {
+    const rows = parseCSV([
+      'Банковская выписка по расчётному счёту',
+      'Период: 01.07.2026–31.07.2026',
+      'Дата операции;Сумма операции;Тип операции;Назначение платежа',
+      '20.07.2026;1 250,50;Доход;Оплата по договору',
+    ].join('\n'))
+    const result = rowsToTransactions(rows, 1)
+
+    expect(result.errors).toHaveLength(0)
+    expect(result.transactions[0]).toMatchObject({
+      date: '2026-07-20',
+      amount: '1250.50',
+      type: 'income',
+      comment: 'Оплата по договору',
+    })
+  })
+
+  it('keeps Excel column indexes when a header cell is empty', () => {
+    const rows = excelRowsToRecords([
+      ['Выписка'],
+      ['Дата операции', '', 'Сумма операции', 'Тип операции'],
+      ['20.07.2026', 'служебное поле', 1250, 'Доход'],
+    ])
+    const result = rowsToTransactions(rows, 1)
+
+    expect(result.transactions[0].amount).toBe('1250.00')
+    expect(result.transactions[0].type).toBe('income')
+  })
+
+  it('understands date-time values and Excel serial dates', () => {
+    expect(parseImportDate('20.07.2026 15:30:00')).toBe('2026-07-20')
+    expect(parseImportDate('2026-07-20T15:30:00')).toBe('2026-07-20')
+    expect(parseImportDate('46223')).toBe('2026-07-20')
+    expect(parseImportDate('31.02.2026')).toBeNull()
+  })
+})
