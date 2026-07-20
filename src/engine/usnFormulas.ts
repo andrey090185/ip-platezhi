@@ -68,8 +68,6 @@ export function calcUsnAdvance(
     const taxBeforeReduction = base.gt(0) ? dMul(base, rateDecimal) : d(0)
 
     const previouslyPaid = d(previouslyPaidUsn)
-    const dueAmount = dMax(d(0), taxBeforeReduction.minus(previouslyPaid))
-
     const minimumTax = dMul(incomeYtd, d(settings.usnMinTaxRate).div(100))
     const isMinimumTax = minimumTax.gt(taxBeforeReduction) && base.gt(0)
     const finalTax = isMinimumTax ? minimumTax : taxBeforeReduction

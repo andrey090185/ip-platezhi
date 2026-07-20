@@ -1,7 +1,8 @@
 import { db } from '../schema'
-import type { Transaction, TransactionType } from '@/types'
-import { dSum, d } from '@/engine/decimal'
-import { syncAdd, syncUpdate, syncDelete } from '@/firebase/syncManager'
+import type { Transaction } from '@/types'
+import { summarizeLedger } from '@/engine/ledger'
+import { transactionFingerprint } from '@/utils/importService'
+import { scheduleSync, syncAdd, syncUpdate, syncDelete } from '@/firebase/syncManager'
 
 export const transactionRepo = {
   async getAll(ipId: number): Promise<Transaction[]> {
@@ -40,32 +41,24 @@ export const transactionRepo = {
     const txs = period
       ? await db.transactions.where({ ipId, period }).toArray()
       : await db.transactions.where('ipId').equals(ipId).toArray()
-    const income = txs
-      .filter(t => t.type === 'income' && t.usnRelevant)
-      .reduce((acc, t) => acc.plus(d(t.amount)), d(0))
-    return income.toFixed(2)
+    const allocations = await db.transactionAllocations.where('ipId').equals(ipId).toArray()
+    return summarizeLedger(txs, allocations).netIncome
   },
 
   async getExpenseTotal(ipId: number, period?: string): Promise<string> {
     const txs = period
       ? await db.transactions.where({ ipId, period }).toArray()
       : await db.transactions.where('ipId').equals(ipId).toArray()
-    const expense = txs
-      .filter(t => t.type === 'expense' && t.usnRelevant)
-      .reduce((acc, t) => acc.plus(d(t.amount)), d(0))
-    return expense.toFixed(2)
+    const allocations = await db.transactionAllocations.where('ipId').equals(ipId).toArray()
+    return summarizeLedger(txs, allocations).netExpenses
   },
 
   async getYearTotals(ipId: number, year: number) {
     const all = await db.transactions.where('ipId').equals(ipId).toArray()
     const yearTxs = all.filter(t => t.date.startsWith(String(year)))
-    const income = yearTxs
-      .filter(t => (t.type === 'income' || t.type === 'return_income') && t.usnRelevant)
-      .reduce((acc, t) => acc.plus(d(t.amount)), d(0))
-    const expenses = yearTxs
-      .filter(t => (t.type === 'expense' || t.type === 'return_expense') && t.usnRelevant)
-      .reduce((acc, t) => acc.plus(d(t.amount)), d(0))
-    return { income: income.toFixed(2), expenses: expenses.toFixed(2) }
+    const allocations = await db.transactionAllocations.where('ipId').equals(ipId).toArray()
+    const summary = summarizeLedger(yearTxs, allocations)
+    return { income: summary.netIncome, expenses: summary.netExpenses }
   },
 
   async getQuarterTotals(ipId: number, year: number, quarter: number) {
@@ -76,19 +69,36 @@ export const transactionRepo = {
       const m = parseInt(t.date.split('-')[1])
       return t.date.startsWith(String(year)) && months.includes(m)
     })
-    const income = quarterTxs
-      .filter(t => (t.type === 'income' || t.type === 'return_income') && t.usnRelevant)
-      .reduce((acc, t) => acc.plus(d(t.amount)), d(0))
-    const expenses = quarterTxs
-      .filter(t => (t.type === 'expense' || t.type === 'return_expense') && t.usnRelevant)
-      .reduce((acc, t) => acc.plus(d(t.amount)), d(0))
-    return { income: income.toFixed(2), expenses: expenses.toFixed(2) }
+    const allocations = await db.transactionAllocations.where('ipId').equals(ipId).toArray()
+    const summary = summarizeLedger(quarterTxs, allocations)
+    return { income: summary.netIncome, expenses: summary.netExpenses }
+  },
+
+  async getCumulativeTotals(ipId: number, year: number, throughMonth: number) {
+    const all = await db.transactions.where('ipId').equals(ipId).toArray()
+    const txs = all.filter(transaction => {
+      const [txYear, txMonth] = transaction.date.split('-').map(Number)
+      return txYear === year && txMonth <= throughMonth
+    })
+    const allocations = await db.transactionAllocations.where('ipId').equals(ipId).toArray()
+    return summarizeLedger(txs, allocations)
   },
 
   async importBatch(ipId: number, records: Omit<Transaction, 'id'>[]): Promise<number> {
-    // Returns the key of the last inserted record
-    const lastKey = await db.transactions.bulkAdd(records as Transaction[])
-    return typeof lastKey === 'number' ? lastKey : 0
+    const existing = await db.transactions.where('ipId').equals(ipId).toArray()
+    const fingerprints = new Set(
+      existing.map(transaction => transaction.fingerprint || transactionFingerprint(transaction)),
+    )
+    const unique = records.filter(transaction => {
+      const fingerprint = transaction.fingerprint || transactionFingerprint(transaction)
+      if (fingerprints.has(fingerprint)) return false
+      fingerprints.add(fingerprint)
+      transaction.fingerprint = fingerprint
+      return true
+    })
+    if (unique.length) await db.transactions.bulkAdd(unique as Transaction[])
+    if (unique.length) scheduleSync()
+    return unique.length
   },
 
   async exportCSV(ipId: number): Promise<Transaction[]> {

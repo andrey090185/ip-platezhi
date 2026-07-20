@@ -1,152 +1,125 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
 import { ipRepo } from '@/db/repositories/ipRepo'
 import { settingsRepo } from '@/db/repositories/settingsRepo'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { transactionRepo } from '@/db/repositories/transactionRepo'
+import { taxCalcRepo } from '@/db/repositories/taxCalcRepo'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
-  DialogDescription, DialogFooter,
-} from '@/components/ui/dialog'
-import { Plus, Trash2, Building2 } from 'lucide-react'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/shared/EmptyState'
+import { MoneyDisplay } from '@/components/shared/MoneyDisplay'
+import { d, dMax } from '@/engine/decimal'
+import type { IpProfile } from '@/types'
+import { ArrowRight, Building2, Plus, Trash2, WalletCards } from 'lucide-react'
+
+interface IpStats { income: string; remaining: string }
 
 export default function IpSelector() {
   const navigate = useNavigate()
-  const { setCurrentIp, setTaxSettings, setHolidays, setIsOnboarded, setIpList, ipList } = useAppStore()
+  const {
+    setCurrentIp, setTaxSettings, setHolidays, setIsOnboarded, setIpList, ipList, userId,
+  } = useAppStore()
+  const [stats, setStats] = useState<Record<number, IpStats>>({})
   const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null)
   const [deleting, setDeleting] = useState(false)
 
-  useEffect(() => {
-    loadIps()
-  }, [])
-
-  const loadIps = async () => {
+  const loadIps = useCallback(async () => {
     const ips = await ipRepo.getAll()
     setIpList(ips)
-  }
+    const entries = await Promise.all(ips.filter(ip => ip.id).map(async ip => {
+      const [totals, obligations] = await Promise.all([
+        transactionRepo.getYearTotals(ip.id!, ip.year),
+        taxCalcRepo.getAll(ip.id!),
+      ])
+      const remaining = obligations.reduce(
+        (sum, item) => sum.plus(dMax(d(0), d(item.amount).minus(d(item.paidAmount)))), d(0),
+      )
+      return [ip.id!, { income: totals.income, remaining: remaining.toFixed(2) }] as const
+    }))
+    setStats(Object.fromEntries(entries))
+  }, [setIpList])
 
-  const handleSelectIp = async (ip: any) => {
-    const settings = await settingsRepo.getTaxSettings(ip.id!)
-    const holidays = await settingsRepo.getHolidays(ip.id!, ip.year)
+  useEffect(() => { void loadIps() }, [loadIps])
+
+  const totals = useMemo(() => ipList.reduce((acc, ip) => ({
+    income: acc.income.plus(d(ip.id ? stats[ip.id]?.income ?? 0 : 0)),
+    remaining: acc.remaining.plus(d(ip.id ? stats[ip.id]?.remaining ?? 0 : 0)),
+  }), { income: d(0), remaining: d(0) }), [ipList, stats])
+
+  const openIp = async (ip: IpProfile) => {
+    const [settings, holidays] = await Promise.all([
+      settingsRepo.getTaxSettings(ip.id!),
+      settingsRepo.getHolidays(ip.id!, ip.year),
+    ])
     setCurrentIp(ip)
-    if (settings) setTaxSettings(settings)
+    setTaxSettings(settings ?? null)
     setHolidays(holidays)
     setIsOnboarded(true)
     navigate('/dashboard')
   }
 
-  const handleDelete = async () => {
+  const deleteIp = async () => {
     if (!deleteTarget) return
     setDeleting(true)
-    await ipRepo.deleteWithCascade(deleteTarget.id)
-    const lastId = localStorage.getItem('ip-platezhi-last-ip-id')
-    if (lastId === String(deleteTarget.id)) {
+    await ipRepo.deleteWithCascade(deleteTarget.id, userId ?? undefined)
+    if (localStorage.getItem('ip-platezhi-last-ip-id') === String(deleteTarget.id)) {
       localStorage.removeItem('ip-platezhi-last-ip-id')
     }
     setDeleteTarget(null)
     setDeleting(false)
-    loadIps()
+    await loadIps()
   }
 
   return (
-    <div className="min-h-screen bg-background p-4 sm:p-6">
-      <div className="max-w-4xl mx-auto space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Мои ИП</h1>
-            <p className="text-muted-foreground">Выберите ИП для работы или добавьте новый</p>
-          </div>
-          <Button onClick={() => navigate('/onboarding')} className="gap-2">
-            <Plus className="w-4 h-4" /> Добавить ИП
-          </Button>
+    <div className="portfolio-shell">
+      <header className="portfolio-header">
+        <div className="flex items-center gap-3"><div className="brand-mark"><span>ИП</span></div><div><strong>ИП Платежи</strong><p>Портфель предпринимателей</p></div></div>
+        <Button onClick={() => navigate('/onboarding')}><Plus className="size-4" /> Добавить ИП</Button>
+      </header>
+
+      <main className="portfolio-main">
+        <div className="page-heading">
+          <div><p className="eyebrow">ВСЕ ПРОФИЛИ</p><h1>Портфель ИП</h1><p>Общая картина и раздельный учёт по каждому предпринимателю.</p></div>
         </div>
 
-        {ipList.length === 0 ? (
-          <EmptyState
-            title="Нет добавленных ИП"
-            description="Создайте первый профиль индивидуального предпринимателя"
-          />
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {ipList.map((ip) => (
-              <Card
-                key={ip.id}
-                className="cursor-pointer transition-all hover:shadow-md hover:border-primary/50"
-              >
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                        <Building2 className="w-5 h-5 text-primary" />
-                      </div>
-                      <div>
-                        <CardTitle className="text-base leading-tight">{ip.name}</CardTitle>
-                        <p className="text-xs text-muted-foreground">ИНН: {ip.inn || 'не указан'}</p>
-                      </div>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-muted-foreground hover:text-red-500"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setDeleteTarget({ id: ip.id!, name: ip.name })
-                      }}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent
-                  className="space-y-3 cursor-pointer"
-                  onClick={() => handleSelectIp(ip)}
-                >
-                  <div className="flex flex-wrap gap-2">
-                    <Badge variant="outline">
-                      {ip.usnObject === 'income' ? 'УСН Доходы' : 'УСН Д-Р'}
-                    </Badge>
-                    <Badge variant="outline">{ip.year}</Badge>
-                    {ip.region && <Badge variant="outline">{ip.region}</Badge>}
-                  </div>
-                  {ip.ndsEnabled && (
-                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                      <Badge variant="secondary" className="text-xs">НДС</Badge>
-                    </div>
-                  )}
-                  <Button variant="outline" size="sm" className="w-full">
-                    Открыть
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
+        <div className="metric-grid">
+          <Card className="metric-card featured"><CardContent><span>Общий доход</span><MoneyDisplay amount={totals.income.toFixed(2)} size="lg" /><small>по всем профилям за рабочий год</small></CardContent></Card>
+          <Card className="metric-card"><CardContent><span>Осталось оплатить</span><MoneyDisplay amount={totals.remaining.toFixed(2)} size="lg" /><small>по рассчитанным обязательствам</small></CardContent></Card>
+          <Card className="metric-card"><CardContent><span>Активных ИП</span><div className="text-3xl font-semibold tabular-nums">{ipList.length}</div><small>данные полностью разделены</small></CardContent></Card>
+        </div>
 
-        <Dialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Удалить ИП?</DialogTitle>
-              <DialogDescription>
-                Все данные ИП «{deleteTarget?.name}» будут безвозвратно удалены:
-                доходы, расходы, расчёты, календарь, настройки.
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setDeleteTarget(null)}>Отмена</Button>
-              <Button
-                variant="destructive"
-                onClick={handleDelete}
-                disabled={deleting}
-              >
-                {deleting ? 'Удаление...' : 'Удалить'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
+        <section className="content-section">
+          <div className="section-heading"><div><p className="eyebrow">ПРОФИЛИ</p><h2>Выберите ИП</h2></div><WalletCards className="size-5 text-muted-foreground" /></div>
+          {ipList.length === 0 ? <EmptyState title="Нет добавленных ИП" description="Создайте первый профиль индивидуального предпринимателя" /> : (
+            <div className="portfolio-grid">
+              {ipList.map(ip => (
+                <Card key={ip.id} className="portfolio-card">
+                  <CardContent>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="profile-icon"><Building2 className="size-5" /></div>
+                      <Button variant="ghost" size="icon" aria-label={`Удалить ${ip.name}`} onClick={() => setDeleteTarget({ id: ip.id!, name: ip.name })}><Trash2 className="size-4 text-muted-foreground" /></Button>
+                    </div>
+                    <div className="mt-4"><h3>{ip.name}</h3><p>ИНН {ip.inn}</p></div>
+                    <div className="flex flex-wrap gap-1.5 mt-3"><Badge variant="outline">УСН «Доходы»</Badge><Badge variant="outline">{ip.year}</Badge>{ip.region && <Badge variant="outline">{ip.region}</Badge>}</div>
+                    <div className="portfolio-values"><div><span>Доход</span><MoneyDisplay amount={ip.id ? stats[ip.id]?.income ?? '0' : '0'} /></div><div><span>К оплате</span><MoneyDisplay amount={ip.id ? stats[ip.id]?.remaining ?? '0' : '0'} /></div></div>
+                    <Button className="w-full" variant="outline" onClick={() => openIp(ip)}>Открыть профиль <ArrowRight className="size-4" /></Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </section>
+      </main>
+
+      <Dialog open={Boolean(deleteTarget)} onOpenChange={open => !open && setDeleteTarget(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Удалить ИП?</DialogTitle><DialogDescription>Профиль «{deleteTarget?.name}» и только связанные с ним операции, платежи и настройки будут удалены локально и из синхронизации. Сделайте резервную копию, если данные могут понадобиться.</DialogDescription></DialogHeader>
+          <DialogFooter><Button variant="outline" onClick={() => setDeleteTarget(null)}>Отмена</Button><Button variant="destructive" disabled={deleting} onClick={deleteIp}>{deleting ? 'Удаляем…' : 'Удалить ИП'}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

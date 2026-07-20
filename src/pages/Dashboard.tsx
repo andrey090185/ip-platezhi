@@ -1,337 +1,186 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/appStore'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { StatusBadge } from '@/components/shared/StatusBadge'
+import { Badge } from '@/components/ui/badge'
 import { MoneyDisplay } from '@/components/shared/MoneyDisplay'
-import { HowCalculated } from '@/components/shared/HowCalculated'
+import { StatusBadge } from '@/components/shared/StatusBadge'
 import { transactionRepo } from '@/db/repositories/transactionRepo'
+import { allocationRepo } from '@/db/repositories/allocationRepo'
 import { taxCalcRepo } from '@/db/repositories/taxCalcRepo'
-import { calendarRepo } from '@/db/repositories/calendarRepo'
-import { generateCalendarEvents } from '@/engine/calendarEngine'
-import { calcUsnAdvance } from '@/engine/usnFormulas'
-import { calcFixedPremium } from '@/engine/insuranceFormulas'
-import { getToday, getDaysUntil, formatDate } from '@/engine/dateUtils'
+import { paymentRepo } from '@/db/repositories/paymentRepo'
+import { recalculateTaxPlan } from '@/services/taxPlanService'
+import { summarizeLedger } from '@/engine/ledger'
+import { d, dMax } from '@/engine/decimal'
+import { formatDate, getDaysUntil } from '@/engine/dateUtils'
 import { formatCurrency } from '@/utils/currency'
+import type { TaxObligation } from '@/types'
 import {
-  TrendingUp, AlertTriangle, CalendarDays,
-  Wallet, Plus, Loader2, CheckCircle2,
-  ArrowRight
+  AlertTriangle, ArrowRight, CalendarClock, CircleCheck, Loader2, Plus, ReceiptText, ShieldCheck, TrendingUp, Wallet,
 } from 'lucide-react'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
+import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+
+const monthNames = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
+const obligationLabels: Record<TaxObligation['type'], string> = {
+  usn_advance: 'Аванс УСН',
+  usn_annual: 'Годовой УСН',
+  ip_premium_fixed: 'Фиксированные взносы',
+  ip_premium_additional: 'Дополнительный 1%',
+  notification: 'Уведомление',
+}
+
+function leftToPay(item: TaxObligation) {
+  return dMax(d(0), d(item.amount).minus(d(item.paidAmount)))
+}
 
 export default function Dashboard() {
   const { currentIp, taxSettings, holidays } = useAppStore()
   const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [data, setData] = useState({
-    totalIncome: '0',
-    upcomingPayments: [] as any[],
-    overduePayments: [] as any[],
-    monthlyData: [] as any[],
-    nearestPayment: null as any,
-    usnDue: '0',
-    usnFormula: '',
-    fixedPremiumAnnual: '0',
-    warnings: [] as string[],
+    income: '0.00',
+    expenses: '0.00',
+    taxPayments: '0.00',
+    accrued: '0.00',
+    paid: '0.00',
+    remaining: '0.00',
+    nearest: null as TaxObligation | null,
+    overdue: 0,
+    reviewCount: 0,
+    monthly: [] as { name: string; income: number }[],
   })
 
-  useEffect(() => {
-    if (!currentIp) {
-      navigate('/onboarding')
-      return
-    }
-    loadData()
-  }, [currentIp])
-
-  const loadData = async () => {
-    if (!currentIp?.id) return
-    const ipId = currentIp.id
-    const year = currentIp.year
-
+  const loadData = useCallback(async () => {
+    if (!currentIp?.id || !taxSettings) return
+    setLoading(true)
+    setLoadError('')
     try {
-      const { income } = await transactionRepo.getYearTotals(ipId, year)
-
-      let calendar = await calendarRepo.getAll(ipId)
-      if (calendar.length === 0 && taxSettings) {
-        const events = await generateCalendarEvents(ipId, taxSettings, holidays)
-        await calendarRepo.addBatch(events)
-        calendar = await calendarRepo.getAll(ipId)
-      }
-
-      const upcoming = await taxCalcRepo.getUpcoming(ipId, 10)
-      const overdue = await taxCalcRepo.getOverdue(ipId)
-
-      let usnDue = '0'
-      let usnFormula = ''
-      let fixedPremiumAnnual = '0'
-      if (taxSettings) {
-        const quarter = Math.ceil((new Date().getMonth() + 1) / 3)
-        const fixedPremiumResult = calcFixedPremium(taxSettings)
-        fixedPremiumAnnual = fixedPremiumResult.annualAmount
-
-        const usnResult = calcUsnAdvance(
-          taxSettings, income, '0',
-          fixedPremiumResult.annualAmount,
-          '0',
-          '0',
-          quarter,
-          false,
-          currentIp.usnObject
-        )
-        usnDue = usnResult.dueAmount
-        usnFormula = usnResult.formula
-      }
-
-      const monthNames = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
-      const monthlyData = await Promise.all(
-        Array.from({ length: 12 }, async (_, i) => {
-          const month = String(i + 1).padStart(2, '0')
-          const period = `${year}-${month}`
-          const txs = await transactionRepo.getByPeriod(ipId, period)
-          const inc = txs.filter(t => t.type === 'income').reduce((a, t) => a + parseFloat(t.amount), 0)
-          const ret = txs.filter(t => t.type === 'return_income').reduce((a, t) => a + parseFloat(t.amount), 0)
-          return { name: monthNames[i], income: inc - ret }
-        })
-      )
-
-      const today = getToday()
-      const futurePayments = calendar
-        .filter(e => e.type === 'payment' && e.date >= today && e.status !== 'paid')
-        .sort((a, b) => a.date.localeCompare(b.date))
-      const nearestPayment = futurePayments[0] || null
-
-      const warnings: string[] = []
-      const incomeNum = parseFloat(income)
-      if (taxSettings) {
-        if (incomeNum > taxSettings.usnIncomeLimit * 0.8) {
-          warnings.push('Доход приближается к лимиту УСН (' + taxSettings.usnIncomeLimit.toLocaleString('ru-RU') + ' ₽)')
-        }
-        if (!currentIp.ndsEnabled && incomeNum > taxSettings.ndsThreshold) {
-          warnings.push('Доход превысил порог освобождения от НДС (' + taxSettings.ndsThreshold.toLocaleString('ru-RU') + ' ₽). Рассмотрите подключение НДС.')
-        }
-      }
+      await recalculateTaxPlan(currentIp, taxSettings, holidays)
+      const [transactions, allocations, obligations, payments] = await Promise.all([
+        transactionRepo.getAll(currentIp.id),
+        allocationRepo.getAll(currentIp.id),
+        taxCalcRepo.getAll(currentIp.id),
+        paymentRepo.getAll(currentIp.id),
+      ])
+      const yearTransactions = transactions.filter(item => item.date.startsWith(String(currentIp.year)))
+      const summary = summarizeLedger(yearTransactions, allocations)
+      const open = obligations
+        .filter(item => leftToPay(item).gt(0))
+        .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+      const monthly = monthNames.map((name, index) => {
+        const period = `${currentIp.year}-${String(index + 1).padStart(2, '0')}`
+        const monthSummary = summarizeLedger(yearTransactions.filter(item => item.period === period), allocations)
+        return { name, income: d(monthSummary.netIncome).toNumber() }
+      })
 
       setData({
-        totalIncome: income,
-        upcomingPayments: upcoming,
-        overduePayments: overdue,
-        monthlyData,
-        nearestPayment,
-        usnDue,
-        usnFormula,
-        fixedPremiumAnnual,
-        warnings,
+        income: summary.netIncome,
+        expenses: summary.netExpenses,
+        taxPayments: summary.taxPayments,
+        accrued: obligations.reduce((sum, item) => sum.plus(d(item.amount)), d(0)).toFixed(2),
+        paid: payments.reduce((sum, item) => sum.plus(d(item.amount)), d(0)).toFixed(2),
+        remaining: obligations.reduce((sum, item) => sum.plus(leftToPay(item)), d(0)).toFixed(2),
+        nearest: open[0] ?? null,
+        overdue: open.filter(item => item.dueDate < new Date().toISOString().slice(0, 10)).length,
+        reviewCount: yearTransactions.filter(item => item.status === 'needs_review').length,
+        monthly,
       })
-    } catch (err) {
-      console.error('Dashboard load error:', err)
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Не удалось рассчитать налоговый план.')
     } finally {
       setLoading(false)
     }
-  }
+  }, [currentIp, holidays, taxSettings])
 
-  const handleMarkPaid = async (eventId: number) => {
-    await calendarRepo.update(eventId, { status: 'paid' })
-    loadData()
-  }
+  useEffect(() => { void loadData() }, [loadData])
 
-  if (!currentIp) return null
+  if (!currentIp || !taxSettings) return null
+  if (loading) return <div className="min-h-[60vh] grid place-items-center"><div className="flex items-center gap-2 text-muted-foreground"><Loader2 className="size-5 animate-spin" /> Собираем сводку…</div></div>
+  if (loadError) return (
+    <div className="page-shell">
+      <div className="page-heading"><div><p className="eyebrow">РАСЧЁТ ПРИОСТАНОВЛЕН</p><h1>{currentIp.name}</h1><p>Операции сохранены, но суммы налогового плана не пересчитывались.</p></div></div>
+      <div className="form-error">{loadError}</div>
+      <Button variant="outline" onClick={() => navigate('/ips')}>Выбрать профиль 2026 года</Button>
+    </div>
+  )
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-        <span className="ml-2 text-muted-foreground">Загрузка данных...</span>
-      </div>
-    )
-  }
+  const vatProgress = Math.min(100, d(data.income).div(d(taxSettings.ndsThreshold)).times(100).toNumber())
+  const limitProgress = Math.min(100, d(data.income).div(d(taxSettings.usnIncomeLimit)).times(100).toNumber())
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+    <div className="page-shell dashboard-page">
+      <div className="page-heading dashboard-heading">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold">Обзор</h1>
-          <p className="text-sm text-muted-foreground">
-            {currentIp.name} · {currentIp.year} · УСН «{currentIp.usnObject === 'income' ? 'Доходы' : 'Доходы минус расходы'}»
-          </p>
+          <p className="eyebrow">ПОРТФЕЛЬ · {currentIp.year}</p>
+          <h1>{currentIp.name}</h1>
+          <p>УСН «Доходы» · ставка {taxSettings.usnRegionalRate || taxSettings.usnRateIncome}% · без сотрудников</p>
         </div>
+        <Button onClick={() => navigate('/income?type=income')}><Plus className="size-4" /> Добавить доход</Button>
       </div>
 
-      {data.overduePayments.length > 0 && (
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3 p-4 rounded-lg bg-red-50 border border-red-200 dark:bg-red-950 dark:border-red-800">
-          <AlertTriangle className="w-5 h-5 text-red-600 shrink-0" />
+      {(data.overdue > 0 || data.reviewCount > 0) && (
+        <div className="action-strip">
+          <AlertTriangle className="size-5" />
           <div className="flex-1">
-            <p className="text-sm font-medium text-red-800 dark:text-red-200">
-              У вас {data.overduePayments.length} просроченных платежей
-            </p>
-            <p className="text-xs text-red-600 dark:text-red-400">
-              Проверьте раздел «Платежи» и отметьте оплаченные
-            </p>
+            <strong>Нужно внимание</strong>
+            <p>{data.overdue > 0 ? `Просрочено обязательств: ${data.overdue}. ` : ''}{data.reviewCount > 0 ? `Операций на проверке: ${data.reviewCount}.` : ''}</p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="border-red-300 text-red-700 hover:bg-red-100 dark:border-red-700 dark:text-red-300 self-start sm:self-auto"
-            onClick={() => navigate('/taxes')}
-          >
-            К платежам
-          </Button>
+          <Button variant="outline" size="sm" onClick={() => navigate(data.overdue > 0 ? '/taxes' : '/income')}>Проверить <ArrowRight className="size-4" /></Button>
         </div>
       )}
 
-      {data.warnings.length > 0 && (
-        <div className="space-y-2">
-          {data.warnings.map((warning, i) => (
-            <div key={i} className="flex items-center gap-3 p-3 rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-950 dark:border-amber-800">
-              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-              <p className="text-sm text-amber-800 dark:text-amber-200">{warning}</p>
+      <div className="metric-grid metric-grid-four">
+        <Card className="metric-card featured"><CardContent><span>Доход с начала года</span><MoneyDisplay amount={data.income} size="lg" /><small>налоговая база после возвратов</small></CardContent></Card>
+        <Card className="metric-card"><CardContent><span>Начислено</span><MoneyDisplay amount={data.accrued} size="lg" /><small>УСН и страховые взносы</small></CardContent></Card>
+        <Card className="metric-card"><CardContent><span>Оплачено</span><MoneyDisplay amount={data.paid} size="lg" /><small>по фактическим платежам</small></CardContent></Card>
+        <Card className="metric-card"><CardContent><span>Осталось оплатить</span><MoneyDisplay amount={data.remaining} size="lg" /><small>по текущему плану</small></CardContent></Card>
+      </div>
+
+      {data.nearest ? (
+        <Card className="next-action-card">
+          <CardContent>
+            <div className="next-action-icon"><CalendarClock className="size-5" /></div>
+            <div className="flex-1">
+              <p className="eyebrow">СЛЕДУЮЩИЙ ПЛАТЁЖ</p>
+              <h2>{obligationLabels[data.nearest.type]} · {data.nearest.period}</h2>
+              <p>до {formatDate(data.nearest.dueDate)} · {getDaysUntil(data.nearest.dueDate) >= 0 ? `${getDaysUntil(data.nearest.dueDate)} дн.` : 'срок прошёл'}</p>
             </div>
-          ))}
-        </div>
+            <div className="text-right"><MoneyDisplay amount={leftToPay(data.nearest).toFixed(2)} size="lg" /><StatusBadge status={data.nearest.status} /></div>
+            <Button onClick={() => navigate('/taxes')}>Открыть платежи <ArrowRight className="size-4" /></Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="next-action-card success"><CardContent><div className="next-action-icon"><CircleCheck className="size-5" /></div><div><p className="eyebrow">СТАТУС</p><h2>Текущие обязательства закрыты</h2><p>Новых сумм к оплате по рассчитанному плану нет.</p></div></CardContent></Card>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <TrendingUp className="w-4 h-4 text-green-500" />
-              Доходы за год
-            </CardTitle>
-          </CardHeader>
+      <div className="dashboard-grid">
+        <Card className="chart-card">
           <CardContent>
-            <MoneyDisplay amount={data.totalIncome} size="lg" className="text-green-600" />
+            <div className="section-heading"><div><p className="eyebrow">ДИНАМИКА</p><h2>Доход по месяцам</h2></div><Badge variant="outline">{currentIp.year}</Badge></div>
+            {data.monthly.some(item => item.income !== 0) ? (
+              <ResponsiveContainer width="100%" height={270}>
+                <BarChart data={data.monthly} barCategoryGap="32%">
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={11} />
+                  <YAxis axisLine={false} tickLine={false} fontSize={11} width={56} tickFormatter={value => `${Math.round(Number(value) / 1000)}k`} />
+                  <Tooltip cursor={{ fill: 'var(--color-muted)' }} formatter={(value: number) => formatCurrency(value)} />
+                  <Bar dataKey="income" fill="var(--chart-primary)" name="Доход" radius={[7, 7, 2, 2]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : <div className="empty-chart"><TrendingUp className="size-7" /><strong>Добавьте первый доход</strong><p>Здесь появится динамика по месяцам.</p></div>}
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <Wallet className="w-4 h-4 text-blue-500" />
-              УСН к доплате
-              {data.usnFormula && <HowCalculated formula={data.usnFormula} />}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <MoneyDisplay amount={data.usnDue} size="lg" />
-            <p className="text-xs text-muted-foreground mt-1">Аванс за текущий квартал</p>
-          </CardContent>
-        </Card>
-
-        <Card
-          className={`cursor-pointer transition-colors ${
-            data.overduePayments.length > 0
-              ? 'border-red-200 bg-red-50 dark:bg-red-950 dark:border-red-800'
-              : 'hover:border-primary/50'
-          }`}
-          onClick={() => navigate('/taxes')}
-        >
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <AlertTriangle className={`w-4 h-4 ${data.overduePayments.length > 0 ? 'text-red-500' : 'text-green-500'}`} />
-              Просроченные платежи
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{data.overduePayments.length}</div>
-          </CardContent>
-        </Card>
+        <div className="space-y-4">
+          <Card className="threshold-card"><CardContent><div className="flex items-center justify-between"><div><p className="eyebrow">КОНТРОЛЬ</p><h3>Порог НДС</h3></div><ShieldCheck className="size-5" /></div><div className="threshold-value"><strong>{vatProgress.toFixed(1)}%</strong><span>{formatCurrency(data.income)} из {formatCurrency(taxSettings.ndsThreshold)}</span></div><div className="progress-track"><span style={{ width: `${vatProgress}%` }} /></div><p>Пассивный мониторинг порога 20 млн ₽. Полный модуль НДС скрыт.</p></CardContent></Card>
+          <Card className="threshold-card"><CardContent><div className="flex items-center justify-between"><div><p className="eyebrow">ЛИМИТ</p><h3>Право на УСН</h3></div><Wallet className="size-5" /></div><div className="threshold-value"><strong>{limitProgress.toFixed(2)}%</strong><span>лимит {formatCurrency(taxSettings.usnIncomeLimit)}</span></div><div className="progress-track"><span style={{ width: `${limitProgress}%` }} /></div><p>Показываем только значимый лимит доходов.</p></CardContent></Card>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              Фиксированные взносы ИП
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <MoneyDisplay amount={data.fixedPremiumAnnual} size="lg" />
-            <p className="text-xs text-muted-foreground mt-1">
-              Годовая сумма · Срок до 28.12.{currentIp.year}
-            </p>
-          </CardContent>
-        </Card>
-
-        {data.nearestPayment && (
-          <Card className="border-primary/20">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Ближайший платёж</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="font-medium truncate">{data.nearestPayment.title}</p>
-                  <p className="text-sm text-muted-foreground">
-                    Срок: {formatDate(data.nearestPayment.date)} ({getDaysUntil(data.nearestPayment.date)} дн.)
-                  </p>
-                  {data.nearestPayment.internalDeadline && (
-                    <p className="text-xs text-amber-600">
-                      Внутренний дедлайн: {formatDate(data.nearestPayment.internalDeadline)}
-                    </p>
-                  )}
-                </div>
-                <div className="flex items-center gap-3 sm:flex-col sm:items-end sm:gap-1">
-                  {data.nearestPayment.amount && (
-                    <MoneyDisplay amount={data.nearestPayment.amount} size="lg" />
-                  )}
-                  <div className="flex items-center gap-2">
-                    <StatusBadge status={data.nearestPayment.status} />
-                    {data.nearestPayment.status !== 'paid' && data.nearestPayment.id && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 px-2 text-xs text-green-600 hover:text-green-700 hover:bg-green-50"
-                        onClick={() => handleMarkPaid(data.nearestPayment.id)}
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
-                        Оплачено
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-medium">Доходы по месяцам</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {data.monthlyData.some(m => m.income > 0) ? (
-            <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={data.monthlyData}>
-                <XAxis dataKey="name" fontSize={12} />
-                <YAxis fontSize={12} />
-                <Tooltip formatter={(value: number) => formatCurrency(value)} />
-                <Bar dataKey="income" fill="#22c55e" name="Доходы" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-8 text-center">
-              <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center mb-3">
-                <TrendingUp className="w-5 h-5 text-muted-foreground" />
-              </div>
-              <p className="text-sm font-medium">Пока нет данных</p>
-              <p className="text-xs text-muted-foreground mt-1">Добавьте первый доход</p>
-              <Button variant="outline" size="sm" className="mt-3" onClick={() => navigate('/income')}>
-                Добавить доход <ArrowRight className="w-3.5 h-3.5 ml-1" />
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <div className="flex flex-wrap gap-2 sm:gap-3">
-        <Button onClick={() => navigate('/income')} className="gap-2">
-          <Plus className="w-4 h-4" /> Добавить доход
-        </Button>
-        <Button onClick={() => navigate('/taxes')} variant="outline" className="gap-2">
-          <CalendarDays className="w-4 h-4" /> Платежи
-        </Button>
+      <div className="quick-actions">
+        <button onClick={() => navigate('/income')}><ReceiptText className="size-5" /><span><strong>Операции</strong><small>Импорт, ручной ввод и разделение</small></span><ArrowRight className="size-4" /></button>
+        <button onClick={() => navigate('/taxes')}><Wallet className="size-5" /><span><strong>Платежи</strong><small>Начисления, сроки и история</small></span><ArrowRight className="size-4" /></button>
       </div>
     </div>
   )

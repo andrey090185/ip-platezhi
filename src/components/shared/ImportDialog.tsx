@@ -35,7 +35,7 @@ export function ImportDialog({ open, onOpenChange, ipId, onImported }: ImportDia
   const [pendingTransactions, setPendingTransactions] = useState<Omit<Transaction, 'id'>[]>([])
   const [importErrors, setImportErrors] = useState<{ row: number; message: string }[]>([])
   const [importing, setImporting] = useState(false)
-  const [result, setResult] = useState<{ imported: number; errors: number } | null>(null)
+  const [result, setResult] = useState<{ imported: number; skipped: number; errors: number } | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -98,8 +98,8 @@ export function ImportDialog({ open, onOpenChange, ipId, onImported }: ImportDia
     if (pendingTransactions.length === 0) return
     setImporting(true)
     try {
-      await transactionRepo.importBatch(ipId, pendingTransactions)
-      setResult({ imported: pendingTransactions.length, errors: importErrors.length })
+      const imported = await transactionRepo.importBatch(ipId, pendingTransactions)
+      setResult({ imported, skipped: pendingTransactions.length - imported, errors: importErrors.length })
       setStep('result')
     } catch {
       setImportErrors(prev => [...prev, { row: 0, message: 'Ошибка сохранения в БД' }])
@@ -282,6 +282,9 @@ export function ImportDialog({ open, onOpenChange, ipId, onImported }: ImportDia
               <p className="text-lg font-semibold">Импорт завершён</p>
               <p className="text-sm text-muted-foreground mt-1">
                 Успешно импортировано: <strong>{result?.imported ?? 0}</strong> операций
+                {result && result.skipped > 0 && (
+                  <span> · дублей пропущено: <strong>{result.skipped}</strong></span>
+                )}
                 {result && result.errors > 0 && (
                   <span className="text-amber-600"> (с предупреждениями: {result.errors})</span>
                 )}

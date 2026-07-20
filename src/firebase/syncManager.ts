@@ -10,9 +10,93 @@ import type { TableName } from './types'
 type SyncStatus = 'synced' | 'syncing' | 'offline' | 'error'
 
 let sessionUserId: string | null = null
+const LOCAL_OWNER_KEY = 'ip-platezhi-local-owner'
+const LEGACY_PENDING_DELETES_KEY = 'ip-platezhi-pending-sync-deletes'
+const pendingDeletesKey = (userId: string) => `${LEGACY_PENDING_DELETES_KEY}:${userId}`
+
+interface PendingDelete { table: TableName; id: number }
+
+function parsePendingDeletes(raw: string | null): PendingDelete[] {
+  try {
+    const value = JSON.parse(raw ?? '[]')
+    return Array.isArray(value) ? value : []
+  } catch {
+    return []
+  }
+}
+
+function readPendingDeletes(userId: string): PendingDelete[] {
+  if (typeof localStorage === 'undefined') return []
+  return parsePendingDeletes(localStorage.getItem(pendingDeletesKey(userId)))
+}
+
+function writePendingDeletes(userId: string, items: PendingDelete[]): void {
+  if (typeof localStorage === 'undefined') return
+  localStorage.setItem(pendingDeletesKey(userId), JSON.stringify(items))
+}
+
+function queueDelete(userId: string, table: TableName, id: number): void {
+  const pending = readPendingDeletes(userId)
+  if (!pending.some(item => item.table === table && item.id === id)) {
+    writePendingDeletes(userId, [...pending, { table, id }])
+  }
+}
+
+async function flushPendingDeletes(userId: string): Promise<void> {
+  const pending = readPendingDeletes(userId)
+  if (!pending.length) return
+  const failed: PendingDelete[] = []
+  for (const item of pending) {
+    try {
+      await syncDeleteFromCloud(userId, item.table, item.id)
+    } catch {
+      failed.push(item)
+    }
+  }
+  writePendingDeletes(userId, failed)
+  if (failed.length) throw new Error(`Не удалось синхронизировать удалений: ${failed.length}`)
+}
+
+function migrateLegacyPendingDeletes(userId: string): void {
+  if (typeof localStorage === 'undefined') return
+  const legacy = parsePendingDeletes(localStorage.getItem(LEGACY_PENDING_DELETES_KEY))
+  if (legacy.length) {
+    const current = readPendingDeletes(userId)
+    const merged = [...current]
+    for (const item of legacy) {
+      if (!merged.some(candidate => candidate.table === item.table && candidate.id === item.id)) merged.push(item)
+    }
+    writePendingDeletes(userId, merged)
+  }
+  localStorage.removeItem(LEGACY_PENDING_DELETES_KEY)
+}
+
+async function prepareLocalWorkspace(userId: string): Promise<void> {
+  if (typeof localStorage === 'undefined') return
+  const previousOwner = localStorage.getItem(LOCAL_OWNER_KEY)
+
+  if (previousOwner && previousOwner !== userId) {
+    suppressSync(true)
+    try {
+      await db.transaction('rw', db.tables, async () => {
+        for (const table of db.tables) await table.clear()
+      })
+    } finally {
+      suppressSync(false)
+    }
+    localStorage.removeItem(LEGACY_PENDING_DELETES_KEY)
+  } else {
+    // Before owner tracking existed, the current signed-in account is the only
+    // safe owner to which queued local deletions can be attributed.
+    migrateLegacyPendingDeletes(userId)
+  }
+
+  localStorage.setItem(LOCAL_OWNER_KEY, userId)
+}
 
 export function setSyncUser(uid: string | null): void {
   sessionUserId = uid
+  if (uid) void flushPendingDeletes(uid).catch(() => onStatus?.('error'))
 }
 
 export function getSyncUser(): string | null {
@@ -31,8 +115,10 @@ const CANON: [any, TableName][] = [
   [db.taxSettings, 'taxSettings'],
   [db.holidays, 'holidays'],
   [db.transactions, 'transactions'],
+  [db.transactionAllocations, 'transactionAllocations'],
   [db.taxObligations, 'taxObligations'],
   [db.payments, 'payments'],
+  [db.paymentAllocations, 'paymentAllocations'],
   [db.calculationSnapshots, 'calculationSnapshots'],
   [db.calendarEvents, 'calendarEvents'],
   [db.auditLogs, 'auditLogs'],
@@ -82,24 +168,23 @@ export async function syncUpdate(userId: string | undefined, dexieTable: any, id
 export async function syncDelete(userId: string | undefined, dexieTable: any, id: number): Promise<void> {
   const uid = resolveUser(userId)
   const table = getTable(dexieTable)
-  if (uid && table) {
-    try {
-      await syncDeleteFromCloud(uid, table, id)
-    } catch (e) {
-      console.warn('Sync delete failed:', e)
-    }
+  if (!table) return
+  // Pure local mode has no cloud owner, therefore nothing should be queued.
+  if (!uid) return
+  try {
+    await syncDeleteFromCloud(uid, table, id)
+  } catch (e) {
+    queueDelete(uid, table, id)
+    onStatus?.('error')
+    console.warn('Sync delete failed:', e)
   }
 }
 
 export async function syncFullTable(userId: string | undefined, dexieTable: any, table: TableName): Promise<void> {
   const uid = resolveUser(userId)
   if (!uid) return
-  try {
-    const data = await dexieTable.toArray()
-    await syncTableToCloud(uid, table, data)
-  } catch (e) {
-    console.warn('Full table sync failed:', e)
-  }
+  const data = await dexieTable.toArray()
+  await syncTableToCloud(uid, table, data)
 }
 
 let syncTimer: ReturnType<typeof setTimeout> | null = null
@@ -122,6 +207,7 @@ export function scheduleSync(): void {
     syncTimer = null
     onStatus?.('syncing')
     try {
+      await flushPendingDeletes(uid)
       await pushAllToCloud(uid)
       onStatus?.('synced')
     } catch (e) {
@@ -142,6 +228,7 @@ export async function mirrorAllFromCloud(userId: string): Promise<void> {
   if (!userId) return
   suppressSync(true)
   try {
+    const failures: unknown[] = []
     for (const [dexieTable, name] of CANON) {
       try {
         const cloud = await syncTableFromCloud(userId, name)
@@ -149,12 +236,22 @@ export async function mirrorAllFromCloud(userId: string): Promise<void> {
           ...(rec as any),
           id: Number(id),
         }))
-        await dexieTable.clear()
-        if (records.length) await dexieTable.bulkPut(records as any)
+        const local = await dexieTable.toArray()
+        const localById = new Map<number, any>(local.map((record: any) => [Number(record.id), record] as [number, any]))
+        const newer = records.filter((record: any) => {
+          const localRecord: any = localById.get(record.id)
+          if (!localRecord) return true
+          const remoteTime = record.updatedAt || record.createdAt || ''
+          const localTime = localRecord.updatedAt || localRecord.createdAt || ''
+          return remoteTime >= localTime
+        })
+        if (newer.length) await dexieTable.bulkPut(newer as any)
       } catch (e) {
         console.warn(`Mirror of table "${name}" failed:`, e)
+        failures.push(e)
       }
     }
+    if (failures.length) throw new Error(`Не удалось синхронизировать таблиц: ${failures.length}`)
   } finally {
     suppressSync(false)
   }
@@ -167,8 +264,11 @@ export async function cloudHasData(userId: string): Promise<boolean> {
 
 export async function syncOnLogin(userId: string): Promise<void> {
   if (!userId) return
+  await prepareLocalWorkspace(userId)
+  await flushPendingDeletes(userId)
   if (await cloudHasData(userId)) {
     await mirrorAllFromCloud(userId)
+    await pushAllToCloud(userId)
   } else {
     await pushAllToCloud(userId)
   }

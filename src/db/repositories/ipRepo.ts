@@ -33,10 +33,14 @@ export const ipRepo = {
 
   async deleteWithCascade(id: number, userId?: string): Promise<void> {
     const tables = [
-      db.taxSettings, db.taxRegimeVersions, db.holidays, db.transactions,
-      db.taxObligations, db.payments, db.calculationSnapshots,
+      db.taxSettings, db.taxRegimeVersions, db.holidays, db.transactions, db.transactionAllocations,
+      db.taxObligations, db.payments, db.paymentAllocations, db.calculationSnapshots,
       db.calendarEvents, db.auditLogs, db.ensRecords, db.reportRecords,
     ]
+    const recordsByTable = await Promise.all(tables.map(async table => ({
+      table,
+      records: await table.where('ipId').equals(id).toArray(),
+    })))
     await db.transaction('rw', [db.ipProfiles, ...tables], async () => {
       for (const table of tables) {
         await table.where('ipId').equals(id).delete()
@@ -44,20 +48,15 @@ export const ipRepo = {
       await db.ipProfiles.delete(id)
     })
 
-    if (userId) {
-      try {
-        const { syncDeleteTable } = await import('@/firebase/sync')
-        const cloudTables = [
-          'ipProfiles', 'taxRegimeVersions', 'taxSettings', 'holidays', 'transactions',
-          'taxObligations', 'payments', 'calculationSnapshots',
-          'calendarEvents', 'auditLogs', 'ensRecords', 'reportRecords'
-        ] as const
-        for (const table of cloudTables) {
-          await syncDeleteTable(userId, table)
+    try {
+      for (const { table, records } of recordsByTable) {
+        for (const record of records) {
+          if (record.id) await syncDelete(userId, table, record.id)
         }
-      } catch (e) {
-        console.warn('Cascade sync failed:', e)
       }
+      await syncDelete(userId, db.ipProfiles, id)
+    } catch (e) {
+      console.warn('Cascade sync failed:', e)
     }
   },
 }

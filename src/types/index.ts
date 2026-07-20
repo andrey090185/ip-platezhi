@@ -5,6 +5,17 @@ export type CalendarEventType = 'payment' | 'notification' | 'report' | 'reminde
 export type ReportStatus = 'planned' | 'prepared' | 'submitted' | 'overdue'
 export type NdsMode = 'standard' | 'special_5' | 'special_7'
 export type ObligationStatus = 'draft' | 'calculated' | 'due' | 'paid' | 'overdue'
+export type AllocationKind =
+  | 'taxable_income'
+  | 'income_return'
+  | 'business_expense'
+  | 'business_expense_refund'
+  | 'tax_payment'
+  | 'non_taxable'
+  | 'personal'
+  | 'transfer'
+  | 'needs_review'
+export type TaxPaymentKind = 'usn' | 'fixed_premium' | 'additional_premium' | 'enp' | 'other_tax'
 
 export interface IpProfile {
   id?: number
@@ -67,7 +78,27 @@ export interface Transaction {
   period: string
   importSource: string | null
   importBatchId: string | null
+  fingerprint?: string | null
   status: 'accounted' | 'not_accounted' | 'needs_review'
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * One bank/manual operation may have several accounting purposes. Amounts are
+ * always positive; the allocation kind determines their effect on the ledger.
+ */
+export interface TransactionAllocation {
+  id?: number
+  ipId: number
+  transactionId: number
+  kind: AllocationKind
+  amount: string
+  category: string
+  taxPaymentKind: TaxPaymentKind | null
+  taxPeriod: string | null
+  obligationId: number | null
+  comment: string
   createdAt: string
   updatedAt: string
 }
@@ -85,6 +116,10 @@ export interface TaxObligation {
   paidDate: string | null
   paymentComment: string
   calculationSnapshotId: number | null
+  notificationDueDate?: string | null
+  availableReduction?: string
+  usedReduction?: string
+  trace?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -92,10 +127,27 @@ export interface TaxObligation {
 export interface Payment {
   id?: number
   ipId: number
+  /** Legacy direct relation. New records use PaymentAllocation. */
   obligationId: number | null
   date: string
   amount: string
   description: string
+  kind?: TaxPaymentKind
+  period?: string | null
+  documentNumber?: string
+  comment?: string
+  source?: 'manual' | 'transaction' | 'opening'
+  sourceTransactionId?: number | null
+  createdAt: string
+  updatedAt?: string
+}
+
+export interface PaymentAllocation {
+  id?: number
+  ipId: number
+  paymentId: number
+  obligationId: number
+  amount: string
   createdAt: string
 }
 

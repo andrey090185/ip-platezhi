@@ -1,5 +1,3 @@
-import type { Transaction } from '@/types'
-
 export function exportToCSV(data: Record<string, any>[], filename: string): void {
   if (data.length === 0) return
   const headers = Object.keys(data[0])

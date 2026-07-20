@@ -1,4 +1,4 @@
-import { d, dFormat, dToString } from '@/engine/decimal'
+import { d, dFormat } from '@/engine/decimal'
 
 export function formatCurrency(amount: string | number): string {
   const val = d(amount)
