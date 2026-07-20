@@ -5,6 +5,7 @@ import { logout } from '@/firebase/auth'
 import { isFirebaseConfigured } from '@/firebase/config'
 import { ipRepo } from '@/db/repositories/ipRepo'
 import { settingsRepo } from '@/db/repositories/settingsRepo'
+import { retrySync } from '@/firebase/syncManager'
 import {
   LayoutDashboard, Receipt, Wallet, Settings, X, Building2, LogOut,
   Cloud, CloudOff, Loader2, ChevronDown, Plus, Check
@@ -23,15 +24,16 @@ const syncStatusConfig = {
   synced: { icon: Cloud, label: 'Синхронизировано', color: 'text-green-500' },
   syncing: { icon: Loader2, label: 'Синхронизация...', color: 'text-blue-500 animate-spin' },
   offline: { icon: CloudOff, label: 'Оффлайн', color: 'text-muted-foreground' },
-  error: { icon: CloudOff, label: 'Ошибка синхронизации', color: 'text-red-500' },
+  error: { icon: CloudOff, label: 'Не удалось синхронизировать', color: 'text-red-500' },
 }
 
 export function Sidebar() {
   const navigate = useNavigate()
-  const { sidebarOpen, setSidebarOpen, currentIp, userId, syncStatus, ipList, setIpList, switchToIp } = useAppStore()
+  const { sidebarOpen, setSidebarOpen, currentIp, userId, userEmail, syncStatus, ipList, setIpList, switchToIp } = useAppStore()
   const syncConfig = syncStatusConfig[syncStatus]
   const SyncIcon = syncConfig.icon
   const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [retryError, setRetryError] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
   // Close dropdown on outside click
@@ -66,6 +68,15 @@ export function Sidebar() {
     window.location.reload()
   }
 
+  const handleRetrySync = async () => {
+    setRetryError(false)
+    try {
+      await retrySync()
+    } catch {
+      setRetryError(true)
+    }
+  }
+
   return (
     <>
       <aside
@@ -80,7 +91,7 @@ export function Sidebar() {
             <div className="brand-mark">
               <span>ИП</span>
             </div>
-            <div><span className="font-semibold text-sidebar-foreground text-sm tracking-tight">ИП Платежи</span><p className="text-[9px] uppercase tracking-[0.18em] text-muted-foreground">Control center</p></div>
+            <div><span className="font-semibold text-sidebar-foreground text-sm tracking-tight">ИП Платежи</span><p className="text-[9px] uppercase tracking-[0.18em] text-muted-foreground">Центр управления</p></div>
           </div>
           <button
             onClick={() => setSidebarOpen(false)}
@@ -187,11 +198,18 @@ export function Sidebar() {
           <div className="p-3 border-t border-sidebar-border shrink-0 space-y-2">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <SyncIcon className={cn('w-3.5 h-3.5', syncConfig.color)} />
-              <span>{syncConfig.label}</span>
+              <span className="flex-1">{syncConfig.label}</span>
+              {syncStatus === 'error' && (
+                <button className="text-primary hover:underline" onClick={handleRetrySync}>Повторить</button>
+              )}
             </div>
+            {retryError && <p className="text-[10px] text-red-500">Проверьте интернет и правила Firebase.</p>}
             {userId && (
               <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground truncate flex-1">{userId.substring(0, 16)}...</span>
+                <div className="min-w-0 flex-1" title={userEmail ?? 'Учётная запись Firebase'}>
+                  <p className="text-[10px] text-muted-foreground">Вы вошли как</p>
+                  <p className="text-xs text-sidebar-foreground truncate">{userEmail ?? 'Учётная запись Firebase'}</p>
+                </div>
                 <Button
                   variant="ghost"
                   size="icon"

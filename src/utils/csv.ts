@@ -1,3 +1,5 @@
+import { findImportHeaderRow } from './importHeaders'
+
 export function exportToCSV(data: Record<string, any>[], filename: string): void {
   if (data.length === 0) return
   const headers = Object.keys(data[0])
@@ -18,39 +20,21 @@ export function exportToCSV(data: Record<string, any>[], filename: string): void
 }
 
 /**
- * Try to decode a Latin-1 string (each char is 0-255) as Windows-1251,
- * returning a proper UTF-8 string. If the result looks like valid Russian text,
- * return it; otherwise return the original.
- */
-function tryDecodeWin1251(text: string): string {
-  // If the text already has valid UTF-8 Russian chars, skip
-  if (/[а-яёА-ЯЁ]/.test(text)) return text
-
-  // Try to interpret each char code as Windows-1251 byte
-  try {
-    const bytes = new Uint8Array(text.length)
-    for (let i = 0; i < text.length; i++) {
-      bytes[i] = text.charCodeAt(i) & 0xFF
-    }
-    const decoded = new TextDecoder('windows-1251').decode(bytes)
-    // If decoding produced meaningful Russian chars, use it
-    if (/[а-яёА-ЯЁ]/.test(decoded)) return decoded
-  } catch {
-    // ignore
-  }
-  return text
-}
-
-/**
  * Parse one CSV line with full quote support, returning the array of fields.
  */
 function parseCSVLine(line: string, delimiter: string): string[] {
   const values: string[] = []
   let current = ''
   let inQuotes = false
-  for (const char of line) {
+  for (let index = 0; index < line.length; index++) {
+    const char = line[index]
     if (char === '"') {
-      inQuotes = !inQuotes
+      if (inQuotes && line[index + 1] === '"') {
+        current += '"'
+        index++
+      } else {
+        inQuotes = !inQuotes
+      }
     } else if (char === delimiter && !inQuotes) {
       values.push(current.trim())
       current = ''
@@ -63,51 +47,79 @@ function parseCSVLine(line: string, delimiter: string): string[] {
 }
 
 /**
- * Detect the CSV delimiter by scanning the first line.
- * Counts occurrences of `,` and `;` (only outside quoted regions)
- * and returns the one with the most matches. Defaults to `,`.
+ * Detect the delimiter across the first records, including files whose first
+ * rows contain a bank name or account details rather than the table header.
  */
-function detectDelimiter(firstLine: string): string {
-  let commaCount = 0
-  let semicolonCount = 0
-  let inQuotes = false
-  for (const char of firstLine) {
-    if (char === '"') {
-      inQuotes = !inQuotes
-    } else if (!inQuotes) {
-      if (char === ',') commaCount++
-      if (char === ';') semicolonCount++
+function detectDelimiter(records: string[]): string {
+  const candidates = [',', ';', '\t']
+  let best = ','
+  let bestCount = 0
+  for (const delimiter of candidates) {
+    const maxColumns = records
+      .slice(0, 60)
+      .reduce((max, record) => Math.max(max, parseCSVLine(record, delimiter).length), 1)
+    if (maxColumns > bestCount) {
+      best = delimiter
+      bestCount = maxColumns
     }
   }
-  // If semicolons significantly outnumber commas, use semicolon
-  if (semicolonCount > commaCount) return ';'
-  return ','
+  return best
+}
+
+function splitCSVRecords(text: string): string[] {
+  const records: string[] = []
+  let current = ''
+  let inQuotes = false
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index]
+    if (char === '"') {
+      current += char
+      if (inQuotes && text[index + 1] === '"') {
+        current += text[index + 1]
+        index++
+      } else {
+        inQuotes = !inQuotes
+      }
+    } else if ((char === '\n' || char === '\r') && !inQuotes) {
+      if (char === '\r' && text[index + 1] === '\n') index++
+      if (current.trim()) records.push(current)
+      current = ''
+    } else {
+      current += char
+    }
+  }
+  if (current.trim()) records.push(current)
+  return records
 }
 
 export function parseCSV(text: string): Record<string, string>[] {
-  // Try to decode if it's Windows-1251
-  text = tryDecodeWin1251(text)
+  const records = splitCSVRecords(text.replace(/^\uFEFF/, ''))
+  if (records.length < 2) return []
 
-  // Normalize line endings (handle CRLF & CR)
-  const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-  const lines = normalized.split('\n').filter(l => l.trim())
-  if (lines.length < 2) return []
-
-  // Detect delimiter from the header line
-  const delimiter = detectDelimiter(lines[0])
-
-  // Parse headers with full quote support
-  const headers = parseCSVLine(lines[0], delimiter).map(h =>
-    h.replace(/^"|"$/g, '').trim()
-  )
+  const delimiter = detectDelimiter(records)
+  const parsedRecords = records.map((record) => parseCSVLine(record, delimiter))
+  const headerIndex = findImportHeaderRow(parsedRecords)
+  if (headerIndex < 0 || headerIndex >= parsedRecords.length - 1) return []
+  const headers = parsedRecords[headerIndex].map((header) => header.trim())
 
   // Parse data rows
-  return lines.slice(1).map(line => {
-    const values = parseCSVLine(line, delimiter)
+  return parsedRecords.slice(headerIndex + 1).map(values => {
     const row: Record<string, string> = {}
     headers.forEach((h, i) => {
-      row[h] = (values[i] || '').replace(/^"|"$/g, '').trim()
+      if (h) row[h] = (values[i] || '').trim()
     })
     return row
-  })
+  }).filter((row) => Object.values(row).some(Boolean))
+}
+
+/** Decode a CSV before parsing. Russian bank exports often use Windows-1251. */
+export function parseCSVBuffer(buffer: ArrayBuffer): Record<string, string>[] {
+  const bytes = new Uint8Array(buffer)
+  let text: string
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  } catch {
+    text = new TextDecoder('windows-1251').decode(bytes)
+  }
+  return parseCSV(text)
 }

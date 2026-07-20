@@ -47,6 +47,14 @@ function kindFor(obligation: TaxObligation): TaxPaymentKind {
   return 'usn'
 }
 
+function obligationSelectLabel(value: string, obligations: TaxObligation[], emptyLabel: string): string {
+  if (value === 'none') return emptyLabel
+  const obligation = obligations.find(item => item.id === Number(value))
+  return obligation
+    ? `${typeLabels[obligation.type]} · ${obligation.period} · осталось ${outstanding(obligation)} ₽`
+    : 'Обязательство не найдено'
+}
+
 export default function TaxCalculation() {
   const { currentIp, taxSettings, holidays } = useAppStore()
   const [obligations, setObligations] = useState<TaxObligation[]>([])
@@ -244,13 +252,13 @@ export default function TaxCalculation() {
                 <div className="space-y-2">
                   <Label>Вид платежа</Label>
                   <Select value={form.kind} onValueChange={value => setForm({ ...form, kind: value as TaxPaymentKind })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Object.entries(paymentKindLabels).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
+                    <SelectTrigger className="w-full"><SelectValue>{paymentKindLabels[form.kind]}</SelectValue></SelectTrigger><SelectContent>{Object.entries(paymentKindLabels).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
                   <Label>Зачесть в обязательство</Label>
                   <Select value={form.obligationId} onValueChange={selectObligation}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectTrigger className="w-full"><SelectValue>{obligationSelectLabel(form.obligationId, obligations, 'Оставить на ЕНС без распределения')}</SelectValue></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Оставить на ЕНС без распределения</SelectItem>
                       {obligations.filter(item => d(outstanding(item)).gt(0)).map(item => <SelectItem key={item.id} value={String(item.id)}>{typeLabels[item.type]} · {item.period} · осталось {outstanding(item)} ₽</SelectItem>)}
@@ -358,7 +366,7 @@ export default function TaxCalculation() {
           <DialogHeader><DialogTitle>Распределить платёж</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="info-note">Доступно на ЕНС: {allocationPayment ? formatCurrency(unallocatedFor(allocationPayment)) : '0 ₽'}.</div>
-            <div className="space-y-2"><Label>Обязательство</Label><Select value={allocationForm.obligationId} onValueChange={selectAllocationObligation}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">Выберите обязательство</SelectItem>{obligations.filter(item => d(outstanding(item)).gt(0)).map(item => <SelectItem key={item.id} value={String(item.id)}>{typeLabels[item.type]} · {item.period} · осталось {outstanding(item)} ₽</SelectItem>)}</SelectContent></Select></div>
+            <div className="space-y-2"><Label>Обязательство</Label><Select value={allocationForm.obligationId} onValueChange={selectAllocationObligation}><SelectTrigger className="w-full"><SelectValue>{obligationSelectLabel(allocationForm.obligationId, obligations, 'Выберите обязательство')}</SelectValue></SelectTrigger><SelectContent><SelectItem value="none">Выберите обязательство</SelectItem>{obligations.filter(item => d(outstanding(item)).gt(0)).map(item => <SelectItem key={item.id} value={String(item.id)}>{typeLabels[item.type]} · {item.period} · осталось {outstanding(item)} ₽</SelectItem>)}</SelectContent></Select></div>
             <div className="space-y-2"><Label>Сумма зачёта, ₽</Label><Input type="number" min="0" value={allocationForm.amount} onChange={event => setAllocationForm({ ...allocationForm, amount: event.target.value })} /></div>
             {error && <p className="form-error">{error}</p>}
             <Button className="w-full" onClick={saveAllocation}>Зачесть платёж</Button>
