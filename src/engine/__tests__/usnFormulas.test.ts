@@ -18,6 +18,7 @@ const baseSettings: TaxSettings = {
   additionalPremiumRate: 1,
   additionalPremiumMax: 321818,
   considerAdditionalInCurrentYear: false,
+  considerPreviousYearAdditional: true,
   ndsThreshold: 20000000,
   ndsMode: 'standard',
   reducedTariffEnabled: false,

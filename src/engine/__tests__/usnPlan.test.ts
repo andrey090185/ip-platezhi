@@ -18,6 +18,7 @@ const settings: TaxSettings = {
   additionalPremiumRate: 1,
   additionalPremiumMax: 321818,
   considerAdditionalInCurrentYear: false,
+  considerPreviousYearAdditional: true,
   ndsThreshold: 20000000,
   ndsMode: 'standard',
   reducedTariffEnabled: false,
@@ -51,5 +52,24 @@ describe('УСН plan', () => {
     expect(periodsAvailableOnDate(2026, new Date('2026-07-20T12:00:00Z')).map(item => item.code))
       .toEqual(['q1', 'h1'])
   })
-})
 
+  it('uses the additional 1% for 2025 when reducing USN for 2026', () => {
+    const plan = buildUsnPlan(settings, [
+      { code: 'q1', income: '2000000', expenses: '0' },
+    ], '0', { previousYearAdditional: '20896', ruleSetVersion: '2026.1' })
+
+    expect(plan[0].availableContributionReduction).toBe('78286.00')
+    expect(plan[0].result.dueAmount).toBe('41714.00')
+    expect(plan[0].trace.steps[2].detail).toContain('за 2025 год')
+  })
+
+  it('does not reuse the 2025 contribution when the user disables carry-over', () => {
+    const plan = buildUsnPlan(
+      { ...settings, considerPreviousYearAdditional: false },
+      [{ code: 'q1', income: '2000000', expenses: '0' }],
+      '0',
+      { previousYearAdditional: '20896' },
+    )
+    expect(plan[0].availableContributionReduction).toBe('57390.00')
+  })
+})

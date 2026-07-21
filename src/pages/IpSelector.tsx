@@ -5,6 +5,7 @@ import { ipRepo } from '@/db/repositories/ipRepo'
 import { settingsRepo } from '@/db/repositories/settingsRepo'
 import { transactionRepo } from '@/db/repositories/transactionRepo'
 import { taxCalcRepo } from '@/db/repositories/taxCalcRepo'
+import { recalculateTaxPlan } from '@/services/taxPlanService'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -30,6 +31,18 @@ export default function IpSelector() {
     const ips = await ipRepo.getAll()
     setIpList(ips)
     const entries = await Promise.all(ips.filter(ip => ip.id).map(async ip => {
+      const [settings, holidays] = await Promise.all([
+        settingsRepo.getTaxSettings(ip.id!),
+        settingsRepo.getHolidays(ip.id!, ip.year),
+      ])
+      if (settings) {
+        try {
+          await recalculateTaxPlan(ip, settings, holidays)
+        } catch {
+          // Keep the selector usable and show the last saved totals. The full
+          // diagnostic remains available after opening the profile.
+        }
+      }
       const [totals, obligations] = await Promise.all([
         transactionRepo.getYearTotals(ip.id!, ip.year),
         taxCalcRepo.getAll(ip.id!),

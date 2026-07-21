@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { ipRepo } from '@/db/repositories/ipRepo'
 import { settingsRepo } from '@/db/repositories/settingsRepo'
 import { createFullBackup, restoreBackup } from '@/services/backupService'
+import { getRuleSet } from '@/engine/taxRules'
 import { Download, FileJson, Save, ShieldCheck, Upload } from 'lucide-react'
 
 export default function Settings() {
@@ -18,7 +19,11 @@ export default function Settings() {
   const [profile, setProfile] = useState({
     name: '', inn: '', region: '', registrationDate: '', ifnsCode: '', oktmo: '', year: 2026,
   })
-  const [tax, setTax] = useState({ rate: 6, considerAdditionalInCurrentYear: false })
+  const [tax, setTax] = useState({
+    rate: 6,
+    considerAdditionalInCurrentYear: false,
+    considerPreviousYearAdditional: true,
+  })
   const [message, setMessage] = useState('')
 
   useEffect(() => {
@@ -34,6 +39,7 @@ export default function Settings() {
     if (taxSettings) setTax({
       rate: taxSettings.usnRegionalRate || taxSettings.usnRateIncome,
       considerAdditionalInCurrentYear: taxSettings.considerAdditionalInCurrentYear,
+      considerPreviousYearAdditional: taxSettings.considerPreviousYearAdditional !== false,
     })
   }, [currentIp, taxSettings])
 
@@ -53,6 +59,7 @@ export default function Settings() {
       year: profile.year,
       usnRegionalRate: tax.rate === taxSettings.usnRateIncome ? 0 : tax.rate,
       considerAdditionalInCurrentYear: tax.considerAdditionalInCurrentYear,
+      considerPreviousYearAdditional: tax.considerPreviousYearAdditional,
     })
     const updated = await settingsRepo.getTaxSettings(currentIp.id)
     if (updated) setTaxSettings(updated)
@@ -86,6 +93,8 @@ export default function Settings() {
   }
 
   if (!currentIp || !taxSettings) return null
+  const previousRules = getRuleSet(currentIp.year - 1)
+  const currentRules = getRuleSet(currentIp.year)
 
   return (
     <div className="page-shell">
@@ -110,7 +119,7 @@ export default function Settings() {
               <div className="space-y-2"><Label>ИНН</Label><Input value={profile.inn} maxLength={12} onChange={event => setProfile({ ...profile, inn: event.target.value.replace(/\D/g, '') })} /></div>
               <div className="space-y-2"><Label>Регион</Label><Input value={profile.region} onChange={event => setProfile({ ...profile, region: event.target.value })} /></div>
               <div className="space-y-2"><Label>Дата регистрации</Label><Input type="date" value={profile.registrationDate} onChange={event => setProfile({ ...profile, registrationDate: event.target.value })} /></div>
-              <div className="space-y-2"><Label>Рабочий год</Label><Input value={profile.year} disabled /><p className="text-xs text-muted-foreground">Для расчёта подключён набор правил 2026.1.</p></div>
+              <div className="space-y-2"><Label>Рабочий год</Label><Input value={profile.year} disabled /><p className="helper-text">Расчёт использует правила {currentRules?.version ?? profile.year} и обязательства предыдущего года.</p></div>
               <div className="space-y-2"><Label>Код ИФНС</Label><Input value={profile.ifnsCode} maxLength={4} onChange={event => setProfile({ ...profile, ifnsCode: event.target.value.replace(/\D/g, '') })} /></div>
               <div className="space-y-2"><Label>ОКТМО</Label><Input value={profile.oktmo} onChange={event => setProfile({ ...profile, oktmo: event.target.value.replace(/\D/g, '') })} /></div>
             </div>
@@ -122,23 +131,28 @@ export default function Settings() {
           <Card><CardContent className="space-y-5">
             <div className="section-heading"><div><p className="eyebrow">РЕЖИМ</p><h2>УСН «Доходы»</h2></div><Badge>Без сотрудников</Badge></div>
             <div className="grid sm:grid-cols-2 gap-4">
-              <div className="space-y-2"><Label>Действующая ставка, %</Label><Input type="number" min="1" max="6" step="0.1" value={tax.rate} onChange={event => setTax({ ...tax, rate: Number(event.target.value) })} /><p className="text-xs text-muted-foreground">Проверьте региональную льготу перед изменением базовых 6%.</p></div>
-              <label className="setting-toggle"><input type="checkbox" checked={tax.considerAdditionalInCurrentYear} onChange={event => setTax({ ...tax, considerAdditionalInCurrentYear: event.target.checked })} /><span><strong>Учитывать дополнительный 1% в текущем году</strong><small>Одну и ту же сумму нельзя повторно использовать в следующем году.</small></span></label>
+              <div className="space-y-2"><Label>Действующая ставка, %</Label><Input type="number" min="1" max="6" step="0.1" value={tax.rate} onChange={event => setTax({ ...tax, rate: Number(event.target.value) })} /><p className="helper-text">Проверьте региональную льготу перед изменением базовых 6%.</p></div>
+              <label className="setting-toggle"><input type="checkbox" checked={tax.considerPreviousYearAdditional} onChange={event => setTax({ ...tax, considerPreviousYearAdditional: event.target.checked })} /><span><strong>Учитывать 1% за {currentIp.year - 1} год в УСН {currentIp.year}</strong><small>Включено по умолчанию. Отключите, только если уже уменьшили на эту сумму налог за {currentIp.year - 1} год.</small></span></label>
+              <label className="setting-toggle sm:col-start-2"><input type="checkbox" checked={tax.considerAdditionalInCurrentYear} onChange={event => setTax({ ...tax, considerAdditionalInCurrentYear: event.target.checked })} /><span><strong>Учитывать 1% за {currentIp.year} год досрочно</strong><small>Если включить, эту сумму нельзя повторно использовать в {currentIp.year + 1} году.</small></span></label>
             </div>
             <Button onClick={saveTax}><Save className="size-4" /> Сохранить настройки</Button>
           </CardContent></Card>
 
           <Card><CardContent>
-            <div className="section-heading"><div><p className="eyebrow">ПРАВИЛА 2026.1</p><h2>Официальные параметры</h2></div><ShieldCheck className="size-5 text-emerald-600" /></div>
-            <div className="rules-grid">
-              <div><span>Фиксированные взносы</span><strong>{taxSettings.fixedPremium.toLocaleString('ru-RU')} ₽</strong></div>
-              <div><span>Порог дополнительного 1%</span><strong>{taxSettings.additionalPremiumThreshold.toLocaleString('ru-RU')} ₽</strong></div>
-              <div><span>Максимум дополнительного взноса</span><strong>{taxSettings.additionalPremiumMax.toLocaleString('ru-RU')} ₽</strong></div>
-              <div><span>Порог НДС</span><strong>{taxSettings.ndsThreshold.toLocaleString('ru-RU')} ₽</strong></div>
-              <div><span>Лимит доходов УСН</span><strong>{taxSettings.usnIncomeLimit.toLocaleString('ru-RU')} ₽</strong></div>
-              <div><span>Версия</span><strong>2026.1 · 20.07.2026</strong></div>
+            <div className="section-heading"><div><p className="eyebrow">ПРАВИЛА {previousRules?.version} + {currentRules?.version}</p><h2>Официальные параметры взносов</h2></div><ShieldCheck className="size-5 text-emerald-600" /></div>
+            <div className="rules-year-grid">
+              {[previousRules, currentRules].filter(Boolean).map(rules => rules && (
+                <div className="rules-year" key={rules.year}>
+                  <div className="rules-year-title"><strong>{rules.year} год</strong><Badge variant="outline">{rules.version}</Badge></div>
+                  <div className="rules-grid">
+                    <div><span>Фиксированные взносы</span><strong>{rules.fixedPremium.toLocaleString('ru-RU')} ₽</strong></div>
+                    <div><span>Порог для 1%</span><strong>{rules.additionalPremiumThreshold.toLocaleString('ru-RU')} ₽</strong></div>
+                    <div><span>Максимум 1%</span><strong>{rules.additionalPremiumMax.toLocaleString('ru-RU')} ₽</strong></div>
+                  </div>
+                </div>
+              ))}
             </div>
-            <p className="mt-4 text-xs text-muted-foreground">Официальные значения не редактируются произвольно в обычном интерфейсе. Полный расчёт НДС и настройки сотрудников скрыты.</p>
+            <p className="helper-text mt-4">Дополнительный взнос считается как (доход за расчётный год − 300 000 ₽) × 1% с учётом годового максимума. Взнос за {currentIp.year - 1} год подлежит уплате до 1 июля {currentIp.year} года.</p>
           </CardContent></Card>
         </TabsContent>
 

@@ -14,6 +14,7 @@ export const DEFAULT_TAX_SETTINGS: Omit<TaxSettings, 'id' | 'ipId' | 'createdAt'
   additionalPremiumRate: 1,
   additionalPremiumMax: 321818,
   considerAdditionalInCurrentYear: false,
+  considerPreviousYearAdditional: true,
   ndsThreshold: 20000000,
   ndsMode: 'standard',
   reducedTariffEnabled: false,
@@ -63,7 +64,23 @@ export function getReportPeriod(quarter: number): string {
   return periods[quarter]
 }
 
-// Versioned rule set for 2026
+// Versioned rule sets. Contribution values are kept separately for each tax
+// year because the additional 1% is paid in the following calendar year.
+export const RULESET_2025: RuleSet = {
+  year: 2025,
+  version: '2025.1',
+  fixedPremium: 53658,
+  additionalPremiumThreshold: 300000,
+  additionalPremiumRate: 1,
+  additionalPremiumMax: 300888,
+  usnIncomeLimit: 450000000,
+  usnAssetLimit: 200000000,
+  ndsThreshold: 60000000,
+  ndsMainRate: 20,
+  effectiveFrom: '2025-01-01',
+  holidays: [],
+}
+
 export const RULESET_2026: RuleSet = {
   year: 2026,
   version: '2026.1',
@@ -95,6 +112,25 @@ export const RULESET_2026: RuleSet = {
 }
 
 export function getRuleSet(year: number): RuleSet | null {
+  if (year === 2025) return RULESET_2025
   if (year === 2026) return RULESET_2026
   return null
+}
+
+export function settingsForRuleSet(settings: TaxSettings, year: number): TaxSettings {
+  const rules = getRuleSet(year)
+  if (!rules) {
+    throw new Error(`Для ${year} года нет проверенного набора налоговых правил. Расчёт остановлен.`)
+  }
+  return {
+    ...settings,
+    year,
+    fixedPremium: rules.fixedPremium,
+    additionalPremiumThreshold: rules.additionalPremiumThreshold,
+    additionalPremiumRate: rules.additionalPremiumRate,
+    additionalPremiumMax: rules.additionalPremiumMax,
+    usnIncomeLimit: rules.usnIncomeLimit,
+    usnAssetLimit: rules.usnAssetLimit,
+    ndsThreshold: rules.ndsThreshold,
+  }
 }

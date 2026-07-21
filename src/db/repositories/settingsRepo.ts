@@ -4,10 +4,17 @@ import { syncAdd, syncUpdate, syncDelete } from '@/firebase/syncManager'
 
 export const settingsRepo = {
   async getTaxSettings(ipId: number): Promise<TaxSettings | undefined> {
-    return db.taxSettings.where('ipId').equals(ipId).first()
+    const settings = await db.taxSettings.where('ipId').equals(ipId).first()
+    return settings
+      ? { ...settings, considerPreviousYearAdditional: settings.considerPreviousYearAdditional !== false }
+      : undefined
   },
 
   async saveTaxSettings(settings: Omit<TaxSettings, 'id'>, userId?: string): Promise<number> {
+    settings = {
+      ...settings,
+      considerPreviousYearAdditional: settings.considerPreviousYearAdditional !== false,
+    }
     const existing = await db.taxSettings.where('ipId').equals(settings.ipId).first()
     if (existing?.id) {
       await db.taxSettings.update(existing.id, { ...settings, updatedAt: new Date().toISOString() })

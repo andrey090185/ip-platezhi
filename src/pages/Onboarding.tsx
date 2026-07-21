@@ -67,6 +67,8 @@ export default function Onboarding() {
         ipId,
         type: 'usn_advance',
         period: `${data.year}-opening`,
+        taxYear: data.year,
+        dueYear: data.year,
         amount: d(data.openingAccruedUsn).toFixed(2),
         dueDate: `${data.year}-01-01`,
         internalDeadline: null,
@@ -96,6 +98,7 @@ export default function Onboarding() {
         description: 'УСН, оплачено до начала работы в приложении',
         kind: 'usn',
         period: `${data.year}-opening`,
+        taxYear: data.year,
         documentNumber: '',
         comment: 'Начальные данные',
         source: 'opening',
@@ -108,6 +111,8 @@ export default function Onboarding() {
         ipId,
         type: 'ip_premium_fixed',
         period: `${data.year}-fixed`,
+        taxYear: data.year,
+        dueYear: data.year,
         amount: d(settings.fixedPremium).toFixed(2),
         dueDate: `${data.year}-12-28`,
         internalDeadline: null,
@@ -132,6 +137,7 @@ export default function Onboarding() {
         description: 'Фиксированные взносы, оплачено ранее',
         kind: 'fixed_premium',
         period: `${data.year}-fixed`,
+        taxYear: data.year,
         documentNumber: '',
         comment: 'Начальные данные',
         source: 'opening',
@@ -165,7 +171,7 @@ export default function Onboarding() {
             <div className="space-y-2"><Label>ИНН</Label><Input value={data.inn} maxLength={12} inputMode="numeric" onChange={event => setData({ ...data, inn: event.target.value.replace(/\D/g, '') })} placeholder="12 цифр" /></div>
             <div className="space-y-2"><Label>Регион</Label><Input value={data.region} onChange={event => setData({ ...data, region: event.target.value })} /></div>
             <div className="space-y-2"><Label>Дата регистрации</Label><Input type="date" value={data.registrationDate} onChange={event => setData({ ...data, registrationDate: event.target.value })} /></div>
-            <div className="space-y-2"><Label>Рабочий год</Label><Input value={data.year} disabled /><p className="text-xs text-muted-foreground">Проверенный набор правил 2026.1.</p></div>
+            <div className="space-y-2"><Label>Рабочий год</Label><Input value={data.year} disabled /><p className="helper-text">Проверенные правила 2025.1 и 2026.1, включая переходящий взнос 1%.</p></div>
             <div className="space-y-2"><Label>Код ИФНС</Label><Input value={data.ifnsCode} maxLength={4} onChange={event => setData({ ...data, ifnsCode: event.target.value.replace(/\D/g, '') })} /></div>
             <div className="space-y-2"><Label>ОКТМО</Label><Input value={data.oktmo} onChange={event => setData({ ...data, oktmo: event.target.value.replace(/\D/g, '') })} /></div>
           </div>

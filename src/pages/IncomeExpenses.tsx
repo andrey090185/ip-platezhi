@@ -25,6 +25,7 @@ import {
 } from '@/engine/ledger'
 import { d } from '@/engine/decimal'
 import { formatCurrency } from '@/utils/currency'
+import { formatObligationPeriod } from '@/utils/taxPeriods'
 import {
   ArrowDownLeft, ArrowUpRight, Download, Edit3, Plus, Split, Trash2, Upload,
 } from 'lucide-react'
@@ -359,13 +360,13 @@ export default function IncomeExpenses() {
                               <SelectTrigger className="w-full min-w-0"><SelectValue>{item.obligationId
                                 ? (() => {
                                     const obligation = obligations.find(entry => entry.id === item.obligationId)
-                                    return obligation ? `${obligationLabels[obligation.type]} · ${obligation.period}` : 'Обязательство не найдено'
+                                    return obligation ? `${obligationLabels[obligation.type]} · ${formatObligationPeriod(obligation)}` : 'Обязательство не найдено'
                                   })()
                                 : 'ЕНП без распределения'}</SelectValue></SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="none">ЕНП без распределения</SelectItem>
                                 {obligations.filter(entry => d(entry.amount).gt(d(entry.paidAmount))).map(entry => (
-                                  <SelectItem key={entry.id} value={String(entry.id)}>{obligationLabels[entry.type]} · {entry.period}</SelectItem>
+                                  <SelectItem key={entry.id} value={String(entry.id)}>{obligationLabels[entry.type]} · {formatObligationPeriod(entry)}</SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>

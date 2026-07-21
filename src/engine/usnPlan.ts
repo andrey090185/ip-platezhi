@@ -29,10 +29,17 @@ export interface UsnPlanPeriod {
   trace: CalculationTrace
 }
 
+export interface UsnPlanOptions {
+  previousYearAdditional?: string
+  ruleSetVersion?: string
+  normativeDate?: string
+}
+
 export function buildUsnPlan(
   settings: TaxSettings,
   inputs: PeriodLedgerInput[],
   openingCalculatedAdvances = '0',
+  options: UsnPlanOptions = {},
 ): UsnPlanPeriod[] {
   let previousAdvances = d(openingCalculatedAdvances)
 
@@ -43,7 +50,13 @@ export function buildUsnPlan(
     const additional = settings.considerAdditionalInCurrentYear
       ? calcAdditionalPremium(settings, input.income).finalAmount
       : '0'
-    const availableReduction = d(settings.fixedPremium).plus(d(additional)).toFixed(2)
+    const previousYearAdditional = settings.considerPreviousYearAdditional !== false
+      ? options.previousYearAdditional ?? '0'
+      : '0'
+    const availableReduction = d(settings.fixedPremium)
+      .plus(d(previousYearAdditional))
+      .plus(d(additional))
+      .toFixed(2)
     const result = calcUsnAdvance(
       settings,
       input.income,
@@ -59,11 +72,19 @@ export function buildUsnPlan(
     const trace: CalculationTrace = {
       period: `${settings.year}-${period.code}`,
       calculationDate: new Date().toISOString(),
-      ruleSetVersion: '2026.1',
+      ruleSetVersion: options.ruleSetVersion ?? `${settings.year}.1`,
       steps: [
         { label: 'Доход нарастающим итогом', detail: `Период: ${period.label}`, amount: input.income },
         { label: 'Налог до уменьшения', detail: `${input.income} × ${result.rate}`, amount: result.taxBeforeReduction },
-        { label: 'Доступное уменьшение', detail: 'Фиксированные взносы' + (settings.considerAdditionalInCurrentYear ? ' и дополнительный 1%' : ''), amount: result.availableReduction },
+        {
+          label: 'Доступное уменьшение',
+          detail: [
+            `Фиксированные взносы за ${settings.year} год`,
+            d(previousYearAdditional).gt(0) ? `дополнительный 1% за ${settings.year - 1} год` : '',
+            d(additional).gt(0) ? `дополнительный 1% за ${settings.year} год` : '',
+          ].filter(Boolean).join(' + '),
+          amount: result.availableReduction,
+        },
         { label: 'Использовано уменьшения', detail: 'Не более суммы исчисленного налога', amount: result.reduction },
         { label: 'Ранее начисленные авансы', detail: 'Именно начисленные, а не фактически оплаченные суммы', amount: result.previouslyPaid },
         { label: 'К начислению за период', detail: 'Неотрицательный результат', amount: result.dueAmount },
@@ -74,7 +95,7 @@ export function buildUsnPlan(
       excludedTransactions: input.excludedTransactionIds ?? [],
       rounding: 'Денежные значения рассчитываются Decimal.js и округляются до копеек.',
       normativeSource: 'ФНС России: УСН и уменьшение налога на страховые взносы',
-      normativeDate: '2026-07-20',
+      normativeDate: options.normativeDate ?? '2026-07-21',
     }
 
     const item: UsnPlanPeriod = {
@@ -99,4 +120,3 @@ export function periodsAvailableOnDate(year: number, today = new Date()): typeof
   const completedMonth = month <= 3 ? 3 : month <= 6 ? 3 : month <= 9 ? 6 : 9
   return REPORTING_PERIODS.filter(period => period.throughMonth <= completedMonth)
 }
-

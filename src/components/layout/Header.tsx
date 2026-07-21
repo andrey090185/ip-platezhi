@@ -17,8 +17,8 @@ export function Header() {
       </Button>
 
       <div className="min-w-0">
-        <p className="text-sm font-medium truncate">{currentIp?.name}</p>
-        <p className="hidden sm:flex items-center gap-1 text-[10px] text-muted-foreground"><Circle className="size-1.5 fill-emerald-500 text-emerald-500" /> Данные хранятся локально и синхронизируются при входе</p>
+        <p className="text-base font-semibold truncate">{currentIp?.name}</p>
+        <p className="hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground"><Circle className="size-1.5 fill-emerald-500 text-emerald-500" /> Данные хранятся локально и синхронизируются при входе</p>
       </div>
 
       <div className="flex-1" />

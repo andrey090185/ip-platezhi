@@ -4,6 +4,7 @@ import { validateAllocationTotal } from '@/engine/ledger'
 import { refreshObligationPaymentState } from './paymentRepo'
 import { scheduleSync, syncDelete } from '@/firebase/syncManager'
 import type { Transaction, TransactionAllocation } from '@/types'
+import { taxYearFromPeriod } from '@/utils/taxPeriods'
 
 export type AllocationDraft = Omit<
   TransactionAllocation,
@@ -42,6 +43,7 @@ async function addGeneratedPayments(
       description: allocation.category || 'Налоговая часть операции',
       kind: allocation.taxPaymentKind ?? 'other_tax',
       period: allocation.taxPeriod,
+      taxYear: taxYearFromPeriod(allocation.taxPeriod) ?? Number(operation.date.slice(0, 4)),
       documentNumber: '',
       comment: allocation.comment || operation.comment,
       source: 'transaction',
