@@ -1,30 +1,6 @@
 import { db } from './schema'
 import type { TaxSettings, Holiday } from '@/types'
-
-const NOW = new Date().toISOString()
-
-const DEFAULT_TAX_SETTINGS: Omit<TaxSettings, 'id'> = {
-  ipId: 0,
-  year: 2026,
-  usnRateIncome: 6,
-  usnRateIncomeMinusExpenses: 15,
-  usnRegionalRate: 0,
-  usnMinTaxRate: 1,
-  usnIncomeLimit: 490500000,
-  usnEmployeeLimit: 130,
-  usnAssetLimit: 218000000,
-  fixedPremium: 57390,
-  additionalPremiumThreshold: 300000,
-  additionalPremiumRate: 1,
-  additionalPremiumMax: 321818,
-  considerAdditionalInCurrentYear: false,
-  ndsThreshold: 20000000,
-  ndsMode: 'standard',
-  reducedTariffEnabled: false,
-  reducedTariffRates: {},
-  createdAt: NOW,
-  updatedAt: NOW,
-}
+import { DEFAULT_TAX_SETTINGS, settingsForRuleSet } from '@/engine/taxRules'
 
 const RUSSIAN_HOLIDAYS_2026 = [
   { date: '2026-01-01', name: 'Новый год', year: 2026 },
@@ -48,13 +24,14 @@ export async function seedTaxSettings(ipId: number, year: number) {
   if (existing) return
 
   const now = new Date().toISOString()
-  await db.taxSettings.add({
+  const base = {
     ...DEFAULT_TAX_SETTINGS,
     ipId,
     year,
     createdAt: now,
     updatedAt: now,
-  } as TaxSettings)
+  } as TaxSettings
+  await db.taxSettings.add(settingsForRuleSet(base, year))
 }
 
 export async function seedHolidays(ipId: number, year: number) {

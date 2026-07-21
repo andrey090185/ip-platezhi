@@ -16,9 +16,11 @@ import { paymentRepo } from '@/db/repositories/paymentRepo'
 import { recalculateTaxPlan } from '@/services/taxPlanService'
 import { d, dMax, dMin } from '@/engine/decimal'
 import { formatDate, getDaysUntil } from '@/engine/dateUtils'
+import { buildTaxPaymentCsv } from '@/utils/taxPaymentExport'
+import { formatObligationPeriod, taxYearFromPeriod } from '@/utils/taxPeriods'
 import type { Payment, PaymentAllocation, TaxObligation, TaxPaymentKind } from '@/types'
 import {
-  AlertCircle, CalendarClock, CheckCircle2, History, Loader2, Plus, RefreshCw, Split, Trash2, WalletCards,
+  AlertCircle, CalendarClock, CheckCircle2, Download, History, Loader2, Plus, RefreshCw, Split, Trash2, WalletCards,
 } from 'lucide-react'
 
 const typeLabels: Record<TaxObligation['type'], string> = {
@@ -47,11 +49,15 @@ function kindFor(obligation: TaxObligation): TaxPaymentKind {
   return 'usn'
 }
 
+function taxYearFor(obligation: TaxObligation): number {
+  return obligation.taxYear ?? taxYearFromPeriod(obligation.period) ?? Number(obligation.dueDate.slice(0, 4))
+}
+
 function obligationSelectLabel(value: string, obligations: TaxObligation[], emptyLabel: string): string {
   if (value === 'none') return emptyLabel
   const obligation = obligations.find(item => item.id === Number(value))
   return obligation
-    ? `${typeLabels[obligation.type]} · ${obligation.period} · осталось ${outstanding(obligation)} ₽`
+    ? `${typeLabels[obligation.type]} · ${formatObligationPeriod(obligation)} · осталось ${outstanding(obligation)} ₽`
     : 'Обязательство не найдено'
 }
 
@@ -71,6 +77,7 @@ export default function TaxCalculation() {
     amount: '',
     kind: 'usn' as TaxPaymentKind,
     period: '',
+    taxYear: new Date().getFullYear(),
     obligationId: 'none',
     allocateAmount: '',
     documentNumber: '',
@@ -126,6 +133,7 @@ export default function TaxCalculation() {
       amount: remainder,
       kind: obligation ? kindFor(obligation) : 'usn',
       period: obligation?.period ?? '',
+      taxYear: obligation?.taxYear ?? currentIp?.year ?? new Date().getFullYear(),
       obligationId: obligation?.id ? String(obligation.id) : 'none',
       allocateAmount: remainder,
       documentNumber: '',
@@ -142,6 +150,7 @@ export default function TaxCalculation() {
       obligationId: value,
       kind: obligation ? kindFor(obligation) : current.kind,
       period: obligation?.period ?? current.period,
+      taxYear: obligation?.taxYear ?? current.taxYear,
       amount: current.amount || remainder,
       allocateAmount: remainder ? dMin(d(current.amount || remainder), d(remainder)).toFixed(2) : '',
     }))
@@ -150,6 +159,10 @@ export default function TaxCalculation() {
   const handleSavePayment = async () => {
     if (!currentIp?.id || !d(form.amount || 0).gt(0)) {
       setError('Укажите сумму платежа больше нуля.')
+      return
+    }
+    if (!Number.isInteger(form.taxYear) || form.taxYear < 2000 || form.taxYear > currentIp.year + 1) {
+      setError('Укажите корректный расчётный год платежа.')
       return
     }
     if (form.obligationId !== 'none' && d(form.allocateAmount || 0).gt(d(form.amount))) {
@@ -166,6 +179,7 @@ export default function TaxCalculation() {
         description: paymentKindLabels[form.kind],
         kind: form.kind,
         period: form.period || null,
+        taxYear: form.taxYear,
         documentNumber: form.documentNumber,
         comment: form.comment,
         source: 'manual',
@@ -221,6 +235,17 @@ export default function TaxCalculation() {
     }
   }
 
+  const handleExportPayments = () => {
+    const csv = buildTaxPaymentCsv(payments, paymentAllocations, obligations)
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' })
+    const href = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = href
+    link.download = `налоговые-платежи-${currentIp?.name || 'ип'}-${new Date().toISOString().slice(0, 10)}.csv`
+    link.click()
+    URL.revokeObjectURL(href)
+  }
+
   if (!currentIp || !taxSettings) return null
 
   const nextDue = obligations.find(item => d(outstanding(item)).gt(0))
@@ -234,6 +259,9 @@ export default function TaxCalculation() {
           <p>Начисления, официальные сроки и фактические оплаты — в одном месте.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={handleExportPayments} disabled={payments.length === 0}>
+            <Download className="size-4" /> Экспорт платежей
+          </Button>
           <Button variant="outline" size="sm" onClick={calculate} disabled={recalculating}>
             {recalculating ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />} Пересчитать
           </Button>
@@ -251,7 +279,16 @@ export default function TaxCalculation() {
                 </div>
                 <div className="space-y-2">
                   <Label>Вид платежа</Label>
-                  <Select value={form.kind} onValueChange={value => setForm({ ...form, kind: value as TaxPaymentKind })}>
+                  <Select value={form.kind} onValueChange={value => {
+                    const kind = value as TaxPaymentKind
+                    setForm({
+                      ...form,
+                      kind,
+                      taxYear: form.obligationId === 'none' && kind === 'additional_premium'
+                        ? currentIp.year - 1
+                        : form.taxYear,
+                    })
+                  }}>
                     <SelectTrigger className="w-full"><SelectValue>{paymentKindLabels[form.kind]}</SelectValue></SelectTrigger><SelectContent>{Object.entries(paymentKindLabels).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
@@ -261,13 +298,14 @@ export default function TaxCalculation() {
                     <SelectTrigger className="w-full"><SelectValue>{obligationSelectLabel(form.obligationId, obligations, 'Оставить на ЕНС без распределения')}</SelectValue></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Оставить на ЕНС без распределения</SelectItem>
-                      {obligations.filter(item => d(outstanding(item)).gt(0)).map(item => <SelectItem key={item.id} value={String(item.id)}>{typeLabels[item.type]} · {item.period} · осталось {outstanding(item)} ₽</SelectItem>)}
+                      {obligations.filter(item => d(outstanding(item)).gt(0)).map(item => <SelectItem key={item.id} value={String(item.id)}>{typeLabels[item.type]} · {formatObligationPeriod(item)} · осталось {outstanding(item)} ₽</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
                 {form.obligationId !== 'none' && <div className="space-y-2"><Label>Сумма зачёта, ₽</Label><Input type="number" min="0" max={form.amount} value={form.allocateAmount} onChange={event => setForm({ ...form, allocateAmount: event.target.value })} /><p className="text-xs text-muted-foreground">Остаток платежа останется нераспределённым на ЕНС.</p></div>}
                 <div className="grid sm:grid-cols-2 gap-4">
-                  <div className="space-y-2"><Label>Период</Label><Input value={form.period} onChange={event => setForm({ ...form, period: event.target.value })} placeholder="2026-q1" /></div>
+                  <div className="space-y-2"><Label>Расчётный год</Label><Input type="number" min="2000" max={currentIp.year + 1} value={form.taxYear} onChange={event => setForm({ ...form, taxYear: Number(event.target.value) })} /><p className="helper-text">Для взноса 1%, начисленного с дохода 2025 года, укажите 2025 — даже если оплатили его в 2026 году.</p></div>
+                  <div className="space-y-2"><Label>Период</Label><Input value={form.period} onChange={event => setForm({ ...form, period: event.target.value })} placeholder="Например, 2025-additional" /></div>
                   <div className="space-y-2"><Label>№ документа</Label><Input value={form.documentNumber} onChange={event => setForm({ ...form, documentNumber: event.target.value })} placeholder="Необязательно" /></div>
                 </div>
                 <div className="space-y-2"><Label>Комментарий</Label><Input value={form.comment} onChange={event => setForm({ ...form, comment: event.target.value })} placeholder="Например, платёж от 15.04" /></div>
@@ -294,7 +332,7 @@ export default function TaxCalculation() {
             <div className="next-action-icon"><CalendarClock className="size-5" /></div>
             <div className="flex-1">
               <p className="eyebrow">БЛИЖАЙШЕЕ ДЕЙСТВИЕ</p>
-              <h2>{typeLabels[nextDue.type]} · {nextDue.period}</h2>
+              <h2>{typeLabels[nextDue.type]} · {formatObligationPeriod(nextDue)}</h2>
               <p>Официальный срок {formatDate(nextDue.dueDate)} · {getDaysUntil(nextDue.dueDate) >= 0 ? `через ${getDaysUntil(nextDue.dueDate)} дн.` : `просрочено на ${Math.abs(getDaysUntil(nextDue.dueDate))} дн.`}</p>
             </div>
             <div className="text-right"><MoneyDisplay amount={outstanding(nextDue)} size="lg" /><Button size="sm" className="mt-2" onClick={() => openPayment(nextDue)}>Внести оплату</Button></div>
@@ -314,7 +352,7 @@ export default function TaxCalculation() {
               return (
                 <Card key={obligation.id} className="obligation-card">
                   <CardContent>
-                    <div className="flex items-start justify-between gap-3"><div><p className="eyebrow">{obligation.period.toUpperCase()}</p><h3>{typeLabels[obligation.type]}</h3></div><StatusBadge status={obligation.status} /></div>
+                    <div className="flex items-start justify-between gap-3"><div><p className="eyebrow">{formatObligationPeriod(obligation).toUpperCase()}</p><h3>{typeLabels[obligation.type]}</h3>{obligation.dueYear && obligation.dueYear !== taxYearFor(obligation) && <p className="helper-text mt-1">Начислено за {taxYearFor(obligation)} · срок оплаты в {obligation.dueYear}</p>}</div><StatusBadge status={obligation.status} /></div>
                     <MoneyDisplay amount={obligation.amount} size="lg" className="mt-5" />
                     <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
                     <div className="grid grid-cols-2 gap-3 text-sm"><div><span>Оплачено</span><strong>{formatCurrency(obligation.paidAmount)}</strong></div><div><span>Осталось</span><strong>{formatCurrency(left)}</strong></div></div>
@@ -351,8 +389,8 @@ export default function TaxCalculation() {
               const unallocated = unallocatedFor(payment)
               return <TableRow key={payment.id}>
                 <TableCell>{formatDate(payment.date)}</TableCell>
-                <TableCell><p className="font-medium">{paymentKindLabels[payment.kind ?? 'other_tax']}</p><p className="text-xs text-muted-foreground">{payment.comment || payment.description}</p></TableCell>
-                <TableCell><div className="flex flex-wrap gap-1">{linked.map(item => <Badge key={item.id} variant="outline">{item.period}</Badge>)}{d(unallocated).gt(0) && <Badge variant="secondary">ЕНС · {formatCurrency(unallocated)}</Badge>}</div></TableCell>
+                <TableCell><p className="font-medium">{paymentKindLabels[payment.kind ?? 'other_tax']}</p><p className="helper-text">За {payment.taxYear ?? payment.period?.match(/^\d{4}/)?.[0] ?? 'неуказанный'} год · {payment.comment || payment.description}</p></TableCell>
+                <TableCell><div className="flex flex-wrap gap-1">{linked.map(item => <Badge key={item.id} variant="outline">{formatObligationPeriod(item)}</Badge>)}{d(unallocated).gt(0) && <Badge variant="secondary">ЕНС · {formatCurrency(unallocated)}</Badge>}</div></TableCell>
                 <TableCell className="text-right font-mono font-semibold">{formatCurrency(payment.amount)}</TableCell>
                 <TableCell><div className="flex justify-end gap-1">{d(unallocated).gt(0) && <Button variant="outline" size="xs" onClick={() => openAllocation(payment)}><Split className="size-3" /> Распределить</Button>}{payment.source !== 'transaction' && <Button variant="ghost" size="icon" onClick={() => handleDeletePayment(payment)}><Trash2 className="size-4 text-red-500" /></Button>}</div></TableCell>
               </TableRow>
@@ -366,7 +404,7 @@ export default function TaxCalculation() {
           <DialogHeader><DialogTitle>Распределить платёж</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="info-note">Доступно на ЕНС: {allocationPayment ? formatCurrency(unallocatedFor(allocationPayment)) : '0 ₽'}.</div>
-            <div className="space-y-2"><Label>Обязательство</Label><Select value={allocationForm.obligationId} onValueChange={selectAllocationObligation}><SelectTrigger className="w-full"><SelectValue>{obligationSelectLabel(allocationForm.obligationId, obligations, 'Выберите обязательство')}</SelectValue></SelectTrigger><SelectContent><SelectItem value="none">Выберите обязательство</SelectItem>{obligations.filter(item => d(outstanding(item)).gt(0)).map(item => <SelectItem key={item.id} value={String(item.id)}>{typeLabels[item.type]} · {item.period} · осталось {outstanding(item)} ₽</SelectItem>)}</SelectContent></Select></div>
+            <div className="space-y-2"><Label>Обязательство</Label><Select value={allocationForm.obligationId} onValueChange={selectAllocationObligation}><SelectTrigger className="w-full"><SelectValue>{obligationSelectLabel(allocationForm.obligationId, obligations, 'Выберите обязательство')}</SelectValue></SelectTrigger><SelectContent><SelectItem value="none">Выберите обязательство</SelectItem>{obligations.filter(item => d(outstanding(item)).gt(0)).map(item => <SelectItem key={item.id} value={String(item.id)}>{typeLabels[item.type]} · {formatObligationPeriod(item)} · осталось {outstanding(item)} ₽</SelectItem>)}</SelectContent></Select></div>
             <div className="space-y-2"><Label>Сумма зачёта, ₽</Label><Input type="number" min="0" value={allocationForm.amount} onChange={event => setAllocationForm({ ...allocationForm, amount: event.target.value })} /></div>
             {error && <p className="form-error">{error}</p>}
             <Button className="w-full" onClick={saveAllocation}>Зачесть платёж</Button>

@@ -62,6 +62,26 @@ export class AppDatabase extends Dexie {
     this.version(3).stores({
       transactions: '++id, ipId, date, type, period, category, status, fingerprint',
     })
+
+    this.version(4).stores({
+      taxObligations: '++id, ipId, type, period, taxYear, dueYear, status',
+      payments: '++id, ipId, obligationId, date, taxYear, sourceTransactionId',
+    }).upgrade(async transaction => {
+      await transaction.table<TaxSettings, number>('taxSettings').toCollection().modify(settings => {
+        if (settings.considerPreviousYearAdditional == null) {
+          settings.considerPreviousYearAdditional = true
+        }
+      })
+      await transaction.table<TaxObligation, number>('taxObligations').toCollection().modify(obligation => {
+        const periodYear = Number(obligation.period.match(/^\d{4}/)?.[0])
+        obligation.taxYear = obligation.taxYear ?? (Number.isFinite(periodYear) ? periodYear : Number(obligation.dueDate.slice(0, 4)))
+        obligation.dueYear = obligation.dueYear ?? Number(obligation.dueDate.slice(0, 4))
+      })
+      await transaction.table<Payment, number>('payments').toCollection().modify(payment => {
+        const periodYear = Number(payment.period?.match(/^\d{4}/)?.[0])
+        payment.taxYear = payment.taxYear ?? (Number.isFinite(periodYear) ? periodYear : Number(payment.date.slice(0, 4)))
+      })
+    })
   }
 }
 

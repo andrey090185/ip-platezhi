@@ -48,6 +48,12 @@ export interface TaxSettings {
   additionalPremiumRate: number
   additionalPremiumMax: number
   considerAdditionalInCurrentYear: boolean
+  /**
+   * Allow the additional contribution accrued for the previous tax year to
+   * reduce USN in the current year. It must be disabled if that contribution
+   * was already used to reduce tax in the accrual year.
+   */
+  considerPreviousYearAdditional: boolean
   ndsThreshold: number
   ndsMode: NdsMode
   reducedTariffEnabled: boolean
@@ -108,6 +114,10 @@ export interface TaxObligation {
   ipId: number
   type: 'usn_advance' | 'usn_annual' | 'ip_premium_fixed' | 'ip_premium_additional' | 'notification'
   period: string
+  /** Year whose income/tax base produced the obligation. */
+  taxYear?: number
+  /** Calendar year in which the statutory payment deadline falls. */
+  dueYear?: number
   amount: string
   dueDate: string
   internalDeadline: string | null
@@ -134,6 +144,8 @@ export interface Payment {
   description: string
   kind?: TaxPaymentKind
   period?: string | null
+  /** Tax/accrual year selected by the user or inherited from an obligation. */
+  taxYear?: number | null
   documentNumber?: string
   comment?: string
   source?: 'manual' | 'transaction' | 'opening'

@@ -5,8 +5,9 @@ import { buildUsnPlan, periodsAvailableOnDate } from '@/engine/usnPlan'
 import { calcAdditionalPremium, calcFixedPremium } from '@/engine/insuranceFormulas'
 import { getInternalDeadline, shiftToNextWorkingDay } from '@/engine/dateUtils'
 import { d } from '@/engine/decimal'
+import { getRuleSet, settingsForRuleSet } from '@/engine/taxRules'
 import { scheduleSync, syncDelete } from '@/firebase/syncManager'
-import type { Holiday, IpProfile, TaxObligation, TaxSettings } from '@/types'
+import type { CalculationTrace, Holiday, IpProfile, TaxObligation, TaxSettings } from '@/types'
 
 function notificationDate(year: number, quarter: number, holidays: Holiday[]): string | null {
   if (quarter === 4) return null
@@ -31,6 +32,7 @@ async function saveSnapshot(
   inputs: unknown,
   result: unknown,
   trace: unknown,
+  ruleSetVersion: string,
 ): Promise<number> {
   const inputJson = JSON.stringify(inputs)
   const resultJson = JSON.stringify(result)
@@ -44,12 +46,40 @@ async function saveSnapshot(
     ipId,
     type,
     period,
-    ruleSetVersion: '2026.1',
+    ruleSetVersion,
     inputs: inputJson,
     result: resultJson,
     trace: JSON.stringify(trace),
     createdAt: new Date().toISOString(),
   })
+}
+
+function contributionTrace(
+  taxYear: number,
+  income: string,
+  threshold: string,
+  calculated: string,
+  maximum: string,
+  result: string,
+  ruleSetVersion: string,
+): CalculationTrace {
+  return {
+    period: `${taxYear}-additional`,
+    calculationDate: new Date().toISOString(),
+    ruleSetVersion,
+    steps: [
+      { label: `Доход за ${taxYear} год`, detail: 'Доходы УСН за вычетом возвратов дохода', amount: income },
+      { label: 'Необлагаемый порог', detail: 'Дополнительный взнос начисляется только с превышения', amount: threshold },
+      { label: 'Расчёт по ставке 1%', detail: `max(0, доход − ${threshold}) × 1%`, amount: calculated },
+      { label: 'Предельная сумма', detail: `Максимум дополнительного взноса за ${taxYear} год`, amount: maximum },
+      { label: 'Дополнительный взнос к уплате', detail: `Срок уплаты — 1 июля ${taxYear + 1} года`, amount: result },
+    ],
+    warnings: [],
+    excludedTransactions: [],
+    rounding: 'Денежные значения рассчитываются Decimal.js и округляются до копеек.',
+    normativeSource: 'НК РФ, статья 430; ФНС России — страховые взносы ИП',
+    normativeDate: '2026-07-21',
+  }
 }
 
 async function upsertObligation(
@@ -75,6 +105,16 @@ async function upsertObligation(
   return { ...record, id }
 }
 
+async function removeObsoleteObligation(existing: TaxObligation | undefined): Promise<void> {
+  if (!existing?.id) return
+  const links = await db.paymentAllocations.where('obligationId').equals(existing.id).toArray()
+  // A historical payment is an accounting fact. Never delete it or its link
+  // merely because source transactions were edited after the payment.
+  if (links.length > 0) return
+  await db.taxObligations.delete(existing.id)
+  await syncDelete(undefined, db.taxObligations, existing.id)
+}
+
 const calculationsInFlight = new Map<number, Promise<TaxObligation[]>>()
 
 async function runTaxPlanCalculation(
@@ -84,16 +124,28 @@ async function runTaxPlanCalculation(
   today = new Date(),
 ): Promise<TaxObligation[]> {
   if (!ip.id) return []
-  if (settings.year !== 2026) {
+  const currentRuleSet = getRuleSet(settings.year)
+  if (!currentRuleSet) {
     throw new Error(`Для ${settings.year} года нет проверенного набора налоговых правил. Расчёт остановлен.`)
   }
-  const periods = periodsAvailableOnDate(settings.year, today)
+  const currentSettings = settingsForRuleSet(settings, settings.year)
+  const previousYear = settings.year - 1
+  const previousRuleSet = getRuleSet(previousYear)
+  const previousSettings = previousRuleSet ? settingsForRuleSet(settings, previousYear) : null
+  const previousYearTotals = previousSettings
+    ? await transactionRepo.getYearTotals(ip.id, previousYear)
+    : null
+  const previousAdditional = previousSettings && previousYearTotals
+    ? calcAdditionalPremium(previousSettings, previousYearTotals.income)
+    : null
+
+  const periods = periodsAvailableOnDate(currentSettings.year, today)
   const ledgerInputs = await Promise.all(periods.map(async period => {
-    const summary = await transactionRepo.getCumulativeTotals(ip.id!, settings.year, period.throughMonth)
+    const summary = await transactionRepo.getCumulativeTotals(ip.id!, currentSettings.year, period.throughMonth)
     const transactions = await transactionRepo.getByDateRange(
       ip.id!,
-      `${settings.year}-01-01`,
-      `${settings.year}-${String(period.throughMonth).padStart(2, '0')}-31`,
+      `${currentSettings.year}-01-01`,
+      `${currentSettings.year}-${String(period.throughMonth).padStart(2, '0')}-31`,
     )
     return {
       code: period.code,
@@ -111,11 +163,14 @@ async function runTaxPlanCalculation(
     .filter(item => item.type === 'usn_advance' && item.period.endsWith('-opening'))
     .reduce((sum, item) => sum.plus(d(item.amount)), d(0))
     .toFixed(2)
-  const plan = buildUsnPlan(settings, ledgerInputs, openingAdvances)
+  const plan = buildUsnPlan(currentSettings, ledgerInputs, openingAdvances, {
+    previousYearAdditional: previousAdditional?.finalAmount ?? '0.00',
+    ruleSetVersion: currentRuleSet.version,
+  })
   const saved: TaxObligation[] = []
 
   for (const item of plan) {
-    const period = `${settings.year}-${item.code}`
+    const period = `${currentSettings.year}-${item.code}`
     const snapshotId = await saveSnapshot(
       ip.id,
       item.quarter === 4 ? 'usn_annual' : 'usn_advance',
@@ -123,17 +178,20 @@ async function runTaxPlanCalculation(
       ledgerInputs.find(input => input.code === item.code),
       item.result,
       item.trace,
+      currentRuleSet.version,
     )
     const dueDate = shiftToNextWorkingDay(item.result.dueDate, holidays)
     saved.push(await upsertObligation({
       ipId: ip.id,
       type: item.quarter === 4 ? 'usn_annual' : 'usn_advance',
       period,
+      taxYear: currentSettings.year,
+      dueYear: Number(dueDate.slice(0, 4)),
       amount: item.result.dueAmount,
       dueDate,
       internalDeadline: getInternalDeadline(dueDate, holidays),
       notificationDueDate: d(item.result.dueAmount).gt(0)
-        ? notificationDate(settings.year, item.quarter, holidays)
+        ? notificationDate(currentSettings.year, item.quarter, holidays)
         : null,
       status: 'calculated',
       calculationSnapshotId: snapshotId,
@@ -143,12 +201,14 @@ async function runTaxPlanCalculation(
     }))
   }
 
-  const fixed = calcFixedPremium(settings)
+  const fixed = calcFixedPremium(currentSettings)
   const fixedDueDate = shiftToNextWorkingDay(fixed.dueDate, holidays)
   saved.push(await upsertObligation({
     ipId: ip.id,
     type: 'ip_premium_fixed',
-    period: `${settings.year}-fixed`,
+    period: `${currentSettings.year}-fixed`,
+    taxYear: currentSettings.year,
+    dueYear: Number(fixedDueDate.slice(0, 4)),
     amount: fixed.annualAmount,
     dueDate: fixedDueDate,
     internalDeadline: getInternalDeadline(fixedDueDate, holidays),
@@ -160,33 +220,74 @@ async function runTaxPlanCalculation(
     trace: JSON.stringify({ formula: fixed.formula }),
   }))
 
-  const annual = await transactionRepo.getYearTotals(ip.id, settings.year)
-  const additional = calcAdditionalPremium(settings, annual.income)
-  if (d(additional.finalAmount).gt(0)) {
-    const additionalDueDate = shiftToNextWorkingDay(additional.dueDate, holidays)
+  if (previousAdditional && previousRuleSet && previousYearTotals && d(previousAdditional.finalAmount).gt(0)) {
+    const dueDate = shiftToNextWorkingDay(previousAdditional.dueDate, holidays)
+    const trace = contributionTrace(
+      previousYear,
+      previousYearTotals.income,
+      previousAdditional.threshold,
+      previousAdditional.calculatedAmount,
+      previousAdditional.maxAmount,
+      previousAdditional.finalAmount,
+      previousRuleSet.version,
+    )
     saved.push(await upsertObligation({
       ipId: ip.id,
       type: 'ip_premium_additional',
-      period: `${settings.year}-additional`,
+      period: `${previousYear}-additional`,
+      taxYear: previousYear,
+      dueYear: Number(dueDate.slice(0, 4)),
+      amount: previousAdditional.finalAmount,
+      dueDate,
+      internalDeadline: getInternalDeadline(dueDate, holidays),
+      notificationDueDate: null,
+      status: 'calculated',
+      calculationSnapshotId: null,
+      availableReduction: currentSettings.considerPreviousYearAdditional !== false
+        ? previousAdditional.finalAmount
+        : '0.00',
+      usedReduction: '0.00',
+      trace: JSON.stringify(trace),
+    }))
+  } else {
+    await removeObsoleteObligation(existing.find(item => (
+      item.type === 'ip_premium_additional' && item.period === `${previousYear}-additional`
+    )))
+  }
+
+  const annual = await transactionRepo.getYearTotals(ip.id, currentSettings.year)
+  const additional = calcAdditionalPremium(currentSettings, annual.income)
+  if (d(additional.finalAmount).gt(0)) {
+    const additionalDueDate = shiftToNextWorkingDay(additional.dueDate, holidays)
+    const trace = contributionTrace(
+      currentSettings.year,
+      annual.income,
+      additional.threshold,
+      additional.calculatedAmount,
+      additional.maxAmount,
+      additional.finalAmount,
+      currentRuleSet.version,
+    )
+    saved.push(await upsertObligation({
+      ipId: ip.id,
+      type: 'ip_premium_additional',
+      period: `${currentSettings.year}-additional`,
+      taxYear: currentSettings.year,
+      dueYear: Number(additionalDueDate.slice(0, 4)),
       amount: additional.finalAmount,
       dueDate: additionalDueDate,
       internalDeadline: getInternalDeadline(additionalDueDate, holidays),
       notificationDueDate: null,
       status: 'calculated',
       calculationSnapshotId: null,
-      availableReduction: settings.considerAdditionalInCurrentYear ? additional.finalAmount : '0.00',
+      availableReduction: currentSettings.considerAdditionalInCurrentYear ? additional.finalAmount : '0.00',
       usedReduction: '0.00',
-      trace: JSON.stringify({ formula: additional.formula }),
+      trace: JSON.stringify(trace),
     }))
   } else {
-    const obsolete = existing.find(item => item.type === 'ip_premium_additional' && item.period === `${settings.year}-additional`)
-    if (obsolete?.id) {
-      const links = await db.paymentAllocations.where('obligationId').equals(obsolete.id).toArray()
-      await db.paymentAllocations.where('obligationId').equals(obsolete.id).delete()
-      await db.taxObligations.delete(obsolete.id)
-      for (const link of links) if (link.id) await syncDelete(undefined, db.paymentAllocations, link.id)
-      await syncDelete(undefined, db.taxObligations, obsolete.id)
-    }
+    await removeObsoleteObligation(existing.find(item => (
+      item.type === 'ip_premium_additional' && item.period === `${currentSettings.year}-additional`
+    )))
   }
 
   for (const obligation of saved) {

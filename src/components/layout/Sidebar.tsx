@@ -91,7 +91,7 @@ export function Sidebar() {
             <div className="brand-mark">
               <span>ИП</span>
             </div>
-            <div><span className="font-semibold text-sidebar-foreground text-sm tracking-tight">ИП Платежи</span><p className="text-[9px] uppercase tracking-[0.18em] text-muted-foreground">Центр управления</p></div>
+            <div><span className="font-semibold text-sidebar-foreground text-base tracking-tight">ИП Платежи</span><p className="text-[11px] uppercase tracking-[0.15em] text-muted-foreground">Центр управления</p></div>
           </div>
           <button
             onClick={() => setSidebarOpen(false)}
@@ -113,8 +113,8 @@ export function Sidebar() {
             >
               <Building2 className="w-4 h-4 shrink-0 text-sidebar-foreground" />
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium truncate">{currentIp.name}</p>
-                <p className="text-[10px] text-muted-foreground">УСН «Доходы» · {currentIp.year}</p>
+                <p className="text-sm font-medium truncate">{currentIp.name}</p>
+                <p className="text-xs text-muted-foreground">УСН «Доходы» · {currentIp.year}</p>
               </div>
               <ChevronDown className={cn('w-4 h-4 shrink-0 text-muted-foreground transition-transform', dropdownOpen && 'rotate-180')} />
             </button>
@@ -132,8 +132,8 @@ export function Sidebar() {
                       )}
                     >
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs truncate">{ip.name}</p>
-                        <p className="text-[10px] text-muted-foreground">
+                        <p className="text-sm truncate">{ip.name}</p>
+                        <p className="text-xs text-muted-foreground">
                           {ip.usnObject === 'income' ? 'УСН 6%' : 'УСН 15%'} · {ip.year}
                         </p>
                       </div>
@@ -150,7 +150,7 @@ export function Sidebar() {
                       setSidebarOpen(false)
                       navigate('/ips')
                     }}
-                    className="w-full flex items-center gap-2 px-3 py-2 rounded text-xs hover:bg-sidebar-accent transition-colors"
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded text-sm hover:bg-sidebar-accent transition-colors"
                   >
                     <Building2 className="w-3.5 h-3.5" />
                     Все ИП
@@ -161,7 +161,7 @@ export function Sidebar() {
                       setSidebarOpen(false)
                       navigate('/onboarding')
                     }}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 rounded text-xs text-muted-foreground hover:bg-sidebar-accent transition-colors"
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded text-sm text-muted-foreground hover:bg-sidebar-accent transition-colors"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     Добавить ИП
@@ -173,7 +173,7 @@ export function Sidebar() {
         )}
 
         <nav className="flex-1 px-3 py-5 space-y-1 overflow-y-auto">
-          <p className="px-3 mb-3 text-[9px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">Рабочее пространство</p>
+          <p className="px-3 mb-3 text-[11px] font-semibold tracking-[0.15em] text-muted-foreground uppercase">Рабочее пространство</p>
           {navItems.map((item) => (
             <NavLink
               key={item.to}
@@ -196,24 +196,24 @@ export function Sidebar() {
 
         {isFirebaseConfigured() && (
           <div className="p-3 border-t border-sidebar-border shrink-0 space-y-2">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <SyncIcon className={cn('w-3.5 h-3.5', syncConfig.color)} />
               <span className="flex-1">{syncConfig.label}</span>
               {syncStatus === 'error' && (
                 <button className="text-primary hover:underline" onClick={handleRetrySync}>Повторить</button>
               )}
             </div>
-            {retryError && <p className="text-[10px] text-red-500">Проверьте интернет и правила Firebase.</p>}
+            {retryError && <p className="text-xs text-red-500">Проверьте интернет и правила Firebase.</p>}
             {userId && (
               <div className="flex items-center justify-between">
                 <div className="min-w-0 flex-1" title={userEmail ?? 'Учётная запись Firebase'}>
-                  <p className="text-[10px] text-muted-foreground">Вы вошли как</p>
-                  <p className="text-xs text-sidebar-foreground truncate">{userEmail ?? 'Учётная запись Firebase'}</p>
+                  <p className="text-xs text-muted-foreground">Вы вошли как</p>
+                  <p className="text-sm text-sidebar-foreground truncate">{userEmail ?? 'Учётная запись Firebase'}</p>
                 </div>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-6 w-6"
+                  className="h-9 w-9"
                   onClick={handleLogout}
                 >
                   <LogOut className="w-3.5 h-3.5" />

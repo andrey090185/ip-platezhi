@@ -237,7 +237,7 @@ export function ImportDialog({ open, onOpenChange, ipId, onImported }: ImportDia
                       <TableRow key={i}>
                         <TableCell className="text-xs">{row.date}</TableCell>
                         <TableCell className="text-xs">
-                          <Badge variant={typeBadgeVariant(row.type)} className="text-[10px]">
+                          <Badge variant={typeBadgeVariant(row.type)}>
                             {row.type}
                           </Badge>
                         </TableCell>
